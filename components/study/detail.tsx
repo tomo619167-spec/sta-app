@@ -3,12 +3,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Pencil,
-  Trash2,
   Plus,
   ArrowRight,
-  ArrowUpRight,
   BookOpen,
+  Timer,
+  Map,
+  PenLine,
+  Lightbulb,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,12 +19,14 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { features } from "@/lib/features";
-import { dateLabel } from "@/lib/model";
+import type { StudyItem } from "@/lib/model";
 import { studyRepository } from "@/lib/storage";
 import { useStudy } from "./provider";
 import { BackLink, Progress, RecordList } from "./shared";
 import { ThemeForm } from "./theme-form";
 import { RecordForm } from "./record-form";
+import { ItemForm } from "./item-form";
+import { ActionMenu } from "./action-menu";
 export function MissingTheme() {
   return (
     <>
@@ -31,7 +34,6 @@ export function MissingTheme() {
       <div className="empty-state">
         <BookOpen strokeWidth={1} size={30} />
         <h1>テーマが見つかりません</h1>
-        <p>この端末に保存されていないか、削除されたテーマです。</p>
         <Button asChild>
           <Link href="/">ホームに戻る</Link>
         </Button>
@@ -40,97 +42,173 @@ export function MissingTheme() {
   );
 }
 export function DetailScreen({ id }: { id: string }) {
-  const { themes, records, refresh } = useStudy();
+  const { themes, subjects, items, records, refresh } = useStudy();
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [itemOpen, setItemOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState<StudyItem>();
+  const [removeTarget, setRemoveTarget] = useState<{
+    kind: "theme" | "item";
+    id: string;
+    name: string;
+  } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [pendingItem, setPendingItem] = useState<{
+    id: string;
+    completed: boolean;
+  } | null>(null);
   const [error, setError] = useState("");
   const theme = themes.find((theme) => theme.id === id);
   if (!theme) return <MissingTheme />;
-  const recent = records.filter((record) => record.themeId === id).slice(0, 5);
+  const subject = subjects.find((subject) => subject.id === theme.subjectId);
+  const themeItems = items.filter((item) => item.themeId === id);
+  const recent = records.filter((record) => record.themeId === id).slice(0, 3);
   async function remove() {
-    if (deleting) return;
-    setDeleting(true);
+    if (busy || !removeTarget) return;
+    setBusy(true);
     setError("");
     try {
-      await studyRepository.deleteTheme(id);
+      if (removeTarget.kind === "theme") {
+        await studyRepository.deleteTheme(id);
+        setRemoveTarget(null);
+        router.replace("/");
+      } else {
+        await studyRepository.deleteItem(removeTarget.id);
+        setRemoveTarget(null);
+      }
       await refresh();
-      router.replace("/");
     } catch {
-      setError("削除できませんでした。時間をおいて再試行してください。");
-      setDeleting(false);
+      setError("削除できませんでした。再試行してください。");
+    } finally {
+      setBusy(false);
     }
   }
+  async function toggle(item: StudyItem) {
+    if (busy) return;
+    setPendingItem({ id: item.id, completed: !item.completed });
+    setBusy(true);
+    setError("");
+    try {
+      await studyRepository.updateItem(item.id, {
+        title: item.title,
+        completed: !item.completed,
+      });
+      await refresh();
+    } catch {
+      setError("保存できませんでした。再試行してください。");
+    } finally {
+      setPendingItem(null);
+      setBusy(false);
+    }
+  }
+  const shortcuts = [
+    { slug: "roadmap", label: "ロードマップ", icon: Map },
+    { slug: "output", label: "アウトプット", icon: PenLine },
+    { slug: "deepen", label: "理解を深める", icon: Lightbulb },
+    { slug: "past-exams", label: "過去問", icon: BookOpen },
+  ];
   return (
     <>
       <BackLink />
-      <section className="detail-intro">
+      <header className="detail-intro">
         <div className="detail-topline">
-          <span className="subject">{theme.subject}</span>
-          <Button variant="ghost" size="sm" onClick={() => setEditOpen(true)}>
-            <Pencil />
-            編集
-          </Button>
+          <span className="subject-label">
+            {subject?.name ?? theme.subject}
+          </span>
+          <ActionMenu
+            label="テーマのメニュー"
+            onEdit={() => setEditOpen(true)}
+            onDelete={() => {
+              setError("");
+              setRemoveTarget({ kind: "theme", id, name: theme.name });
+            }}
+          />
         </div>
         <h1>{theme.name}</h1>
-        <p className="detail-description">
-          {theme.description ||
-            "まだ説明がありません。学びたいことを書き添えてみましょう。"}
-        </p>
-        <span className="muted-text">{dateLabel(theme.createdAt)}に作成</span>
-      </section>
-      <section className="detail-progress">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">STEP BY STEP</span>
-            <h2>理解の進捗</h2>
-          </div>
-          <span className="phase-badge">ロードマップは準備中</span>
-        </div>
-        <Progress theme={theme} />
-        <p className="input-hint">
-          Phase 2でロードマップを作成すると、ここに進捗が表示されます。
-        </p>
-      </section>
-      <section>
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">FIVE WAYS TO LEARN</span>
-            <h2>学びを育てる</h2>
-          </div>
-        </div>
-        <p className="section-description">
-          5つの学習機能は今後追加予定です。各項目から予定内容を確認できます。
-        </p>
-        <div className="feature-list">
-          {features.map((feature, index) => (
-            <Link
-              key={feature.slug}
-              href={`/themes/${id}/${feature.slug}`}
-              className="feature-item"
-            >
-              <span className="feature-index">0{index + 1}</span>
-              <feature.icon size={21} strokeWidth={1.3} />
-              <div>
-                <h3>{feature.name}</h3>
-                <p>{feature.label}</p>
-              </div>
-              <span className="feature-end">
-                <span>準備中</span>
-                <ArrowUpRight size={15} />
-              </span>
-            </Link>
+        {theme.description && (
+          <p className="detail-description">{theme.description}</p>
+        )}
+        <Progress items={themeItems} label={theme.name} />
+      </header>
+      <nav className="learning-actions" aria-label="学習機能">
+        <div className="feature-grid">
+          {shortcuts.map(({ slug, label, icon: Icon }) => (
+            <Button asChild variant="outline" key={slug}>
+              <Link href={`/themes/${id}/${slug}`}>
+                <Icon />
+                <span>{label}</span>
+                <small>準備中</small>
+              </Link>
+            </Button>
           ))}
         </div>
+        <Button asChild className="focus-button">
+          <Link href={`/themes/${id}/pomodoro`}>
+            <Timer />
+            集中する<small>準備中</small>
+          </Link>
+        </Button>
+      </nav>
+      <section className="items-section">
+        <div className="section-heading">
+          <h2>
+            学習項目 <span className="count">{themeItems.length}</span>
+          </h2>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setEditingItem(undefined);
+              setItemOpen(true);
+            }}
+          >
+            <Plus />
+            項目を追加
+          </Button>
+        </div>
+        {themeItems.length ? (
+          <ul className="item-list">
+            {themeItems.map((item) => (
+              <li key={item.id}>
+                <label className="item-check">
+                  <input
+                    type="checkbox"
+                    checked={
+                      pendingItem?.id === item.id
+                        ? pendingItem.completed
+                        : item.completed
+                    }
+                    onChange={() => void toggle(item)}
+                    disabled={busy}
+                  />
+                  <span>{item.title}</span>
+                </label>
+                <ActionMenu
+                  label={`${item.title}のメニュー`}
+                  onEdit={() => {
+                    setEditingItem(item);
+                    setItemOpen(true);
+                  }}
+                  onDelete={() => {
+                    setError("");
+                    setRemoveTarget({
+                      kind: "item",
+                      id: item.id,
+                      name: item.title,
+                    });
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="quiet-empty">項目を追加して、学びを小さく。</p>
+        )}
       </section>
       <section className="recent-section">
         <div className="section-heading">
-          <div>
-            <span className="eyebrow">YOUR LEARNING NOTES</span>
-            <h2>最近の学習記録</h2>
-          </div>
+          <h2>学習記録</h2>
           <Button
             variant="outline"
             size="sm"
@@ -143,53 +221,43 @@ export function DetailScreen({ id }: { id: string }) {
         {recent.length ? (
           <>
             <RecordList records={recent} themes={themes} />
-            <Link href={`/history?theme=${id}`} className="text-link">
-              このテーマの記録をすべて見る
+            <Link className="text-link" href={`/history?theme=${id}`}>
+              すべて見る
               <ArrowRight size={14} />
             </Link>
           </>
         ) : (
-          <div className="quiet-record-empty">
-            <Pencil size={20} strokeWidth={1.2} />
-            <p>
-              学んだことを、ひとこと。
-              <br />
-              <span>小さな記録が、理解の足あとになります。</span>
-            </p>
-          </div>
+          <p className="quiet-empty">まだ記録はありません。</p>
         )}
       </section>
-      <div className="detail-footer">
-        <span className="muted-text">
-          このテーマと記録は端末内に保存されます
-        </span>
-        <Button
-          variant="ghost"
-          onClick={() => {
-            setError("");
-            setDeleteOpen(true);
-          }}
-          className="delete-link"
-        >
-          <Trash2 />
-          テーマを削除
-        </Button>
-      </div>
+      {error && !removeTarget && (
+        <p className="form-error" role="alert">
+          {error}
+        </p>
+      )}
       <ThemeForm theme={theme} open={editOpen} onOpenChange={setEditOpen} />
       <RecordForm themeId={id} open={recordOpen} onOpenChange={setRecordOpen} />
+      <ItemForm
+        themeId={id}
+        item={editingItem}
+        open={itemOpen}
+        onClose={() => setItemOpen(false)}
+      />
       <Dialog
-        open={deleteOpen}
+        open={!!removeTarget}
         onOpenChange={(value) => {
-          if (!deleting) setDeleteOpen(value);
+          if (!value && !busy) setRemoveTarget(null);
         }}
       >
         <DialogContent>
           <DialogTitle className="dialog-title">
-            テーマを削除しますか？
+            {removeTarget?.kind === "theme" ? "テーマ" : "学習項目"}
+            を削除しますか？
           </DialogTitle>
           <DialogDescription className="dialog-description">
-            「{theme.name}
-            」と、このテーマの学習記録を削除します。この操作は元に戻せません。
+            「{removeTarget?.name}」
+            {removeTarget?.kind === "theme" ? "と学習項目・記録" : ""}
+            を削除します。元に戻せません。
           </DialogDescription>
           {error && (
             <p role="alert" className="form-error">
@@ -199,8 +267,8 @@ export function DetailScreen({ id }: { id: string }) {
           <div className="form-actions">
             <Button
               variant="outline"
-              onClick={() => setDeleteOpen(false)}
-              disabled={deleting}
+              onClick={() => setRemoveTarget(null)}
+              disabled={busy}
               autoFocus
             >
               キャンセル
@@ -208,9 +276,9 @@ export function DetailScreen({ id }: { id: string }) {
             <Button
               variant="destructive"
               onClick={() => void remove()}
-              disabled={deleting}
+              disabled={busy}
             >
-              {deleting ? "削除中…" : "削除する"}
+              削除する
             </Button>
           </div>
         </DialogContent>
@@ -223,29 +291,24 @@ export function FeatureScreen({ id, slug }: { id: string; slug: string }) {
   const theme = themes.find((theme) => theme.id === id);
   const feature = features.find((feature) => feature.slug === slug);
   if (!theme) return <MissingTheme />;
-  if (!feature)
-    return (
-      <>
-        <BackLink href={`/themes/${id}`}>テーマに戻る</BackLink>
-        <div className="empty-state">
-          <h1>ページが見つかりません</h1>
-        </div>
-      </>
-    );
   return (
     <>
       <BackLink href={`/themes/${id}`}>テーマに戻る</BackLink>
       <section className="feature-placeholder">
-        <span className="eyebrow">COMING IN PHASE {feature.phase}</span>
-        <feature.icon size={42} strokeWidth={1} />
-        <h1>{feature.name}</h1>
-        <span className="phase-badge">準備中 · 現在は利用できません</span>
-        <h2>{feature.label}</h2>
-        <p>{feature.description}</p>
-        <div className="placeholder-note">
-          現在のPhase
-          1では、テーマの管理と学習メモの記録が使えます。AI機能はアプリ内に搭載せず、今後も外部AIとのコピー・取り込みで連携する方針です。
-        </div>
+        {feature ? (
+          <>
+            <feature.icon size={36} strokeWidth={1} />
+            <h1>{feature.name}</h1>
+            <span className="phase-badge">準備中 · 現在は利用できません</span>
+            <p>
+              {feature.slug === "roadmap"
+                ? "ロードマップの整理・JSON取り込みはPhase 2で追加します。"
+                : `Phase ${feature.phase}で追加予定です。`}
+            </p>
+          </>
+        ) : (
+          <h1>ページが見つかりません</h1>
+        )}
         <Button asChild variant="outline">
           <Link href={`/themes/${id}`}>
             テーマに戻る

@@ -1,117 +1,125 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import { Plus, ArrowRight, ArrowUpRight } from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
 import { ThemeForm } from "./theme-form";
-import { EmptyThemes, ThemeCard } from "./shared";
-import { dateLabel } from "@/lib/model";
+import { EmptyThemes } from "./shared";
+import { ActionMenu } from "./action-menu";
+import { SubjectManager } from "./subject-manager";
+import { progress } from "@/lib/model";
 export function HomeScreen() {
-  const { themes, records } = useStudy();
+  const { themes, subjects, items } = useStudy();
   const [open, setOpen] = useState(false);
+  const [manager, setManager] = useState(false);
+  const [filter, setFilter] = useState("");
   const recent = themes
     .filter((theme) => theme.lastStudiedAt)
     .sort((a, b) => b.lastStudiedAt!.localeCompare(a.lastStudiedAt!))
-    .slice(0, 3);
-  const today = new Intl.DateTimeFormat("ja-JP", {
-    month: "long",
-    day: "numeric",
-    weekday: "long",
-  }).format(new Date());
+    .slice(0, 2);
+  const shown = subjects.filter((subject) => !filter || subject.id === filter);
   return (
     <>
-      <section className="home-intro">
-        <div className="intro-topline">
-          <span className="eyebrow">A LITTLE SPACE FOR LEARNING</span>
-          <time className="today">{today}</time>
+      <header className="page-heading">
+        <div>
+          <span className="eyebrow">MY NOTEBOOK</span>
+          <h1>学びのノート</h1>
         </div>
-        <h1>
-          学びに、
-          <br className="mobile-break" />
-          余白を。
-        </h1>
-        <p>
-          「わかる」を、自分の言葉に。
-          <br />
-          あなたの理解を、一冊ずつ育てよう。
-        </p>
-        <div className="intro-rule">
-          <span>YOUR PERSONAL STUDY NOTEBOOK</span>
-          <span>01 —</span>
-        </div>
-      </section>
-      <section className="recent-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span>
-            <h2>最近の学び</h2>
-          </div>
-          {recent.length > 0 && (
-            <Link href="/history" className="text-link">
-              記録を見る
-              <ArrowRight size={14} />
-            </Link>
-          )}
-        </div>
-        {recent.length ? (
-          <div className="recent-list">
+        <Button onClick={() => setOpen(true)} size="sm">
+          <Plus />
+          テーマ
+        </Button>
+      </header>
+      {recent.length > 0 && (
+        <section className="recent-section">
+          <h2>最近の学び</h2>
+          <div className="recent-links">
             {recent.map((theme) => (
-              <Link
-                href={`/themes/${theme.id}`}
-                key={theme.id}
-                className="recent-item"
-              >
-                <span className="recent-book" aria-hidden="true">
-                  学
-                </span>
-                <div>
-                  <span className="subject-text">{theme.subject}</span>
-                  <h3>{theme.name}</h3>
-                  <span className="muted-text">
-                    {dateLabel(theme.lastStudiedAt!)}に学習
-                  </span>
-                </div>
-                <ArrowUpRight size={18} />
+              <Link key={theme.id} href={`/themes/${theme.id}`}>
+                {theme.name}
+                <ChevronRight size={16} />
               </Link>
             ))}
           </div>
-        ) : (
-          <p className="quiet-empty">
-            {themes.length
-              ? "テーマを開いて「学習を記録」すると、ここに表示されます。"
-              : "ここに、あなたの学びの続きが並びます。"}
-          </p>
-        )}
-      </section>
-      <section className="themes-section">
-        <div className="section-heading">
-          <div>
-            <span className="eyebrow">YOUR COLLECTION</span>
-            <h2>
-              学習テーマ <span className="count">{themes.length}</span>
-            </h2>
-          </div>
-          <Button onClick={() => setOpen(true)} variant="outline" size="sm">
-            <Plus />
-            テーマを追加
-          </Button>
+        </section>
+      )}
+      <section className="collection">
+        <div className="collection-heading">
+          <h2>科目</h2>
+          <ActionMenu
+            label="科目の管理"
+            editLabel="科目を管理"
+            onEdit={() => setManager(true)}
+          />
         </div>
-        {themes.length ? (
-          <div className="theme-grid">
-            {themes.map((theme, index) => (
-              <ThemeCard key={theme.id} theme={theme} index={index} />
+        {subjects.length > 0 && (
+          <div className="subject-tabs" aria-label="科目で絞り込み">
+            <button onClick={() => setFilter("")} aria-pressed={!filter}>
+              すべて
+            </button>
+            {subjects.map((subject) => (
+              <button
+                key={subject.id}
+                onClick={() => setFilter(subject.id)}
+                aria-pressed={filter === subject.id}
+              >
+                {subject.name}
+              </button>
             ))}
           </div>
-        ) : (
+        )}
+        {shown.map((subject) => (
+          <section className="subject-group" key={subject.id}>
+            <div className="subject-heading">
+              <h3>{subject.name}</h3>
+              <span>
+                {
+                  themes.filter((theme) => theme.subjectId === subject.id)
+                    .length
+                }{" "}
+                テーマ
+              </span>
+            </div>
+            <div className="theme-list">
+              {themes
+                .filter((theme) => theme.subjectId === subject.id)
+                .map((theme) => {
+                  const value = progress(
+                    items.filter((item) => item.themeId === theme.id),
+                  );
+                  return (
+                    <Link
+                      className="theme-row"
+                      href={`/themes/${theme.id}`}
+                      key={theme.id}
+                    >
+                      <span>{theme.name}</span>
+                      <small>{value.percent}%</small>
+                      <ChevronRight size={17} />
+                    </Link>
+                  );
+                })}
+            </div>
+            {!themes.some((theme) => theme.subjectId === subject.id) && (
+              <button
+                className="empty-subject"
+                onClick={() => {
+                  setFilter(subject.id);
+                  setOpen(true);
+                }}
+              >
+                ＋ テーマを追加
+              </button>
+            )}
+          </section>
+        ))}
+        {!themes.length && !subjects.length && (
           <EmptyThemes onCreate={() => setOpen(true)} />
         )}
       </section>
-      <footer className="page-colophon">
-        <span>積み重ねた学びは、あなたのもの。</span>
-        <span>{records.length} LEARNING NOTES</span>
-      </footer>
-      <ThemeForm open={open} onOpenChange={setOpen} />
+      <ThemeForm open={open} onOpenChange={setOpen} initialSubjectId={filter} />
+      <SubjectManager open={manager} onClose={() => setManager(false)} />
     </>
   );
 }

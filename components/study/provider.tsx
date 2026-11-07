@@ -9,9 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { studyRepository } from "@/lib/storage";
-import type { StudyRecord, Theme } from "@/lib/model";
+import type { Subject, StudyItem, StudyRecord, Theme } from "@/lib/model";
 interface StudyState {
   themes: Theme[];
+  subjects: Subject[];
+  items: StudyItem[];
   records: StudyRecord[];
   loading: boolean;
   error: string | null;
@@ -19,6 +21,9 @@ interface StudyState {
 }
 const Context = createContext<StudyState | null>(null);
 export function StudyProvider({ children }: { children: ReactNode }) {
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [items, setItems] = useState<StudyItem[]>([]);
+  const [blocked, setBlocked] = useState(false);
   const [themes, setThemes] = useState<Theme[]>([]);
   const [records, setRecords] = useState<StudyRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,11 +32,16 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
-      const [themes, records] = await Promise.all([
+      const [themes, records, subjects, items] = await Promise.all([
         studyRepository.listThemes(),
         studyRepository.listRecords(),
+        studyRepository.listSubjects(),
+        studyRepository.listItems(),
       ]);
       if (request !== generation.current) return;
+      setSubjects(subjects);
+      setItems(items);
+      setBlocked(false);
       setThemes(themes);
       setRecords(records);
       setError(null);
@@ -49,14 +59,29 @@ export function StudyProvider({ children }: { children: ReactNode }) {
     const onFocus = () => {
       void refresh();
     };
+    const onBlocked = () => setBlocked(true);
+    window.addEventListener("study-storage-blocked", onBlocked);
     window.addEventListener("focus", onFocus);
     return () => {
       generation.current++;
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("study-storage-blocked", onBlocked);
     };
   }, [refresh]);
   return (
-    <Context.Provider value={{ themes, records, loading, error, refresh }}>
+    <Context.Provider
+      value={{
+        themes,
+        records,
+        subjects,
+        items,
+        loading: loading && !blocked,
+        error: blocked
+          ? "別のタブで旧版が開いています。そのタブを閉じてください。データの移行はその後に自動で続きます。"
+          : error,
+        refresh,
+      }}
+    >
       {children}
     </Context.Provider>
   );
