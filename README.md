@@ -1,102 +1,96 @@
 # 余白 — YOHAKU / sta-app
 
-高校生・大学生向けの、学びを深めるミニマルな学習Webアプリ。クリームホワイト、チャコール、オリーブグレーを使い、上質なノートを思わせるスマホファーストUIにしています。
+科目 → 学習テーマ → 学習項目で学びを整理する、スマホ向けの学習ノート。
 
 ## 起動
 
-Node.js 24を推奨（Next.jsの最低要件は20.9以上）。APIキー、Supabase、環境変数の設定は不要です。
+Node.js 24を推奨。APIキー・環境変数は不要です。
 
 ```sh
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
-# PRがマージされる前は実装ブランチに切り替える
-git checkout codex/phase-1-study-app
+# Phase 1.5のPRがマージされる前のみ
+git checkout codex/phase-1-5
 npm install
 npm run dev
 ```
 
-[http://localhost:3000](http://localhost:3000) を開きます。初回は白紙の状態です。「テーマを追加」から始めてください。
-
-本番相当の起動：
+[http://localhost:3000](http://localhost:3000) を開きます。ホームの「＋ テーマ」から、科目を選択・追加して学びを始められます。開発・本番ビルドはWebpackを明示しています。
 
 ```sh
 npm run build
 npm start
 ```
 
-開発・ビルドともWebpackを明示しています。今回の実行環境ではTurbopack内部のローカルポート作成が制限されるためです。Next.js App Routerの構成は変わりません。
+## Phase 1.5
 
-## Phase 1の実装
+- 科目ごとのテーマ一覧と絞り込み。最近の学びは最大2件
+- 科目の選択・追加・名称変更。正規化した名称の一意インデックスで重複を防止
+- テーマの作成・編集・移動・確認付き削除
+- 学習項目の追加・編集・完了チェック・確認付き削除。項目から進捗を計算
+- 学習メモの保存、詳細の最近3件と全記録画面
+- 主要4機能はアイコン付きの短いボタン、ポモドーロは独立した「集中する」ボタン。編集・削除は「…」メニュー
+- スマホの入力画面を全画面化。VisualViewportに追従し、本文だけをスクロール、保存ボタンを表示領域内に配置
 
-- ホーム：テーマ一覧、作成、進捗、最近学習したテーマ（最大3件）
-- テーマ詳細：科目・説明、編集、確認付き削除、ロードマップ進捗、5機能の導線、最近の学習記録（最大5件）
-- 学習を記録：短い学習メモを現在日時で保存。実際に記録したテーマだけを「最近の学び」に表示
-- 記録画面：全記録とテーマ別の絞り込み
-- 共通：下部ナビ、空状態、存在しないテーマ、読み込み中、保存不可時の表示、フォームの必須・文字数検証
-- IndexedDB保存：ページ更新後も保持、テーマ削除時は関連記録も同一トランザクションで削除
-- 320pxからPCまでのレスポンシブUI、44px以上の主要タップ領域、フォーカス表示、Radix Dialogによるフォーカス制御、safe-area対応
+ロードマップの整理・JSON取り込み、アウトプット、理解を深める、過去問、ポモドーロタイマー自体は**準備中**です。アプリ内AIは搭載しません。
 
-**5つの学習機能自体は未実装です。** 導線にも遷移先にも「準備中」と表示しています。Phase 1ではロードマップは未作成・0%で、実績を装うサンプルデータは投入しません。
+## 保存構造・移行
 
-AI機能、タイマー、過去問演習、JSON取り込みは動作しません。アプリ内AIは今後も搭載せず、外部AIとプロンプトのコピー・JSON取り込みで連携する設計方針です。
+IndexedDBの同じ`yohaku-study`データベースをバージョン1から2へ自動移行します。ブラウザデータの消去は不要です。同じオリジン・同じブラウザで更新してください。
 
-## 技術構成と分離
+| ストア           | 内容                                                 |
+| ---------------- | ---------------------------------------------------- |
+| subjects         | 科目。安定したID、表示名、正規化名                   |
+| themes           | テーマ。科目IDと、既存の全フィールド                 |
+| items            | 学習項目。テーマID、本文、順序、完了状態             |
+| records          | 学習メモ。既存レコードは変更しない                   |
+| legacy-themes-v1 | 移行前テーマの原本。旧科目文字列・ロードマップを含む |
 
-Next.js 16.4.5（App Router）/ TypeScript / Tailwind CSS 4 / shadcn/ui構成（new-york、Radixを使うButton・Dialog）/ IndexedDB（idb）。依存バージョンはpackage-lock.jsonで固定しています。Webフォントなど外部アセットの取得は不要です。
+旧テーマには`subjectId`だけを追加します。旧データの科目文字列・説明・日時・ID・ロードマップは変更せず、原本も退避します。同名科目は科目IDを共有し、旧ロードマップの内容・順序・完了状態を学習項目に引き継ぎます。移行全体を単一のversionchangeトランザクションで行い、失敗すればv1へロールバックします。再度開いても重複移行しません。
 
-```text
-app/                         App Routerのページ・共通レイアウト
-components/study/            ホーム・詳細・フォーム・記録・共通UI
-components/ui/               プロジェクトで所有・調整するUIプリミティブ
-lib/model.ts                 データ型・入力検証・進捗の計算
-lib/storage/repository.ts    UIから使う保存処理のインターフェース
-lib/storage/indexed-db.ts    IndexedDBアダプター（DBバージョン1）
-lib/storage/index.ts         利用するアダプターの選択
-lib/features.ts             今後の5機能の表示・予定Phase
-```
+科目名を変更してもテーマはIDで関連付いたままです。テーマを別科目に移しても学習項目・記録は維持します。ユーザーが明示的にテーマを削除した場合のみ、そのテーマの項目・記録・退避原本を同時に削除します。科目自体は残ります。
 
-画面は`StudyRepository`インターフェースを使用し、IndexedDBを直接操作しません。将来のSupabase対応では認証・所有者チェック・移行を設計し、同インターフェースを実装したアダプターを追加します。現時点でSupabase接続や同期機能はありません。
+旧版を別タブで開いていて移行が待機する場合は、画面に案内を表示します。該当タブを閉じると移行が続きます。
 
-テーマには作成・更新・最終学習日時とロードマップ項目、記録にはテーマID・本文・日時を保持します。進捗は完了項目数から計算します。テーマを開く、または編集するだけでは「学習した」扱いにしません。
+## 構成
 
-## テスト
+Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadixプリミティブ / IndexedDB（idb）。依存はpackage-lock.jsonで固定しています。
+
+- `lib/model.ts`：データ型、入力検証、名前の正規化、進捗
+- `lib/storage/repository.ts`：保存処理のインターフェース
+- `lib/storage/indexed-db.ts`：IndexedDB v2アダプターとv1移行
+- `lib/storage/index.ts`：アダプター選択。将来Supabase対応をここで切り替え
+- `components/study/`：画面・フォーム・科目選択・メニュー
+- `components/ui/dialog.tsx`：VisualViewport対応のダイアログ
+- `components/study/editor-dialog.tsx`：共通の全画面入力レイアウト
+
+## 検証
 
 ```sh
 npm run typecheck
 npm test
 npm run build
-# 初回だけブラウザを取得
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:e2e
 ```
 
-E2Eは本番ビルドを3100番ポートで起動します。すでに起動したローカルサーバーがあれば再利用します。テストごとに独立したブラウザコンテキストを使い、通常利用ブラウザのデータに触れません。
+E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイル、PCのChromiumを使用します。本番ビルドを3100番ポートで起動し、テストごとにブラウザコンテキストを分離します。
 
-既存Chromeを使うmacOSの例：
+既存Chromeを使用する場合は`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`に実行ファイルを指定できます。WebKitは別途取得してください。
 
-```sh
-PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" npm run test:e2e
-```
+詳しい結果と実機検証の限界は[docs/phase-1-5.md](docs/phase-1-5.md)を参照してください。Phase 1の履歴は[docs/phase-1.md](docs/phase-1.md)に残しています。
 
-今回の検証結果は[docs/phase-1.md](docs/phase-1.md)に記載しています。
+## 保存範囲
 
-## ローカル保存の範囲
-
-データは同一オリジン・同一ブラウザのIndexedDB内だけに保存されます。ページ更新で保持されますが、別端末・別ブラウザには同期されません。ブラウザデータ消去、プライベートブラウズ終了、端末故障などで失われる場合があります。バックアップ・復元、クラウド同期、サービスワーカーによるオフライン起動は今回の対象外です。
-
-IndexedDBを利用できない場合、メモリ保存に切り替えて「保存済み」と装わず、エラーと再試行を表示します。保存に失敗したフォームは入力を維持します。
+ページ更新後も保持されますが、別端末・別ブラウザへの同期、バックアップ・復元、オフライン起動は未対応です。ブラウザデータの消去やプライベートモード終了で消える場合があります。移行用原本も同じIndexedDB内にあるため、外部バックアップではありません。
 
 ## 次の開発
 
-1. Phase 2：ロードマップの項目管理・完了状態、外部AI用プロンプト、JSONのスキーマ検証・取り込み
-2. Phase 3：アウトプット・理解を深めるノート
-3. Phase 4：過去問・ポモドーロタイマー
-4. Phase 5：記録の連携・振り返り。バックアップとSupabase認証・同期は導入前に移行方針を決める
-
-実機のiOS Safari・Android Chromeでの操作確認と、ホスティング設定は次に必要です。今回の作業ではGitHubのPRを作成し、デプロイは実施していません。
+Phase 2でロードマップの整理・外部AI向けプロンプト・JSON検証と取り込みを追加します。実機iOS Safari・Android Chromeでのソフトキーボード確認、デプロイは別途必要です。
 
 ## 参考
 
-- [Next.js Installation](https://nextjs.org/docs/app/getting-started/installation)
-- [shadcn/ui Manual Installation](https://ui.shadcn.com/docs/installation/manual)
-- [shadcn/ui Next.js](https://ui.shadcn.com/docs/installation/next)
+- [Next.js](https://nextjs.org/docs/app/getting-started/installation)
+- [shadcn/ui](https://ui.shadcn.com/docs/installation/manual)
+- [VisualViewport](https://developer.mozilla.org/en-US/docs/Web/API/VisualViewport)
+- [Chromeのキーボードとビューポート](https://developer.chrome.com/blog/viewport-resize-behavior/)

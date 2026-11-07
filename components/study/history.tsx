@@ -19,9 +19,7 @@ export function HistoryScreen({
   return (
     <>
       <section className="page-intro">
-        <span className="eyebrow">LITTLE STEPS, LASTING KNOWLEDGE</span>
-        <h1>学びの足あと。</h1>
-        <p>積み重ねた言葉が、理解の輪郭になる。</p>
+        <h1>学習記録</h1>
       </section>
       <div className="history-filter">
         <label htmlFor="history-theme">学習テーマ</label>
@@ -48,12 +46,7 @@ export function HistoryScreen({
       ) : (
         <div className="empty-state">
           <History size={30} strokeWidth={1} />
-          <h2>最初の一歩を、残そう。</h2>
-          <p>
-            テーマの詳細画面から「学習を記録」で
-            <br />
-            今日の学びを書き留められます。
-          </p>
+          <h2>まだ記録はありません。</h2>
           <Button asChild variant="outline">
             <Link href="/">
               学習テーマへ

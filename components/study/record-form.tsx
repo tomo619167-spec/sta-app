@@ -1,14 +1,8 @@
 "use client";
-import { useState, type FormEvent } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { useEffect, useState, type FormEvent } from "react";
 import { studyRepository } from "@/lib/storage";
 import { useStudy } from "./provider";
+import { EditorDialog } from "./editor-dialog";
 export function RecordForm({
   themeId,
   open,
@@ -22,11 +16,14 @@ export function RecordForm({
   const [note, setNote] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (open) setError("");
+  }, [open]);
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (saving) return;
     if (!note.trim()) {
-      setError("今日学んだことを入力してください。");
+      setError("学習内容を入力してください。");
       return;
     }
     setSaving(true);
@@ -37,68 +34,33 @@ export function RecordForm({
       setNote("");
       onOpenChange(false);
     } catch {
-      setError(
-        "記録を保存できませんでした。入力内容を残しています。保存設定や空き容量を確認して、再試行してください。",
-      );
+      setError("保存できませんでした。入力を残しています。");
     } finally {
       setSaving(false);
     }
   }
   return (
-    <Dialog
+    <EditorDialog
       open={open}
-      onOpenChange={(value) => {
-        if (!saving) {
-          setError("");
-          onOpenChange(value);
-        }
-      }}
+      onClose={() => onOpenChange(false)}
+      title="学習を記録"
+      onSubmit={submit}
+      saveLabel="学習を保存"
+      busy={saving}
+      error={error}
     >
-      <DialogContent>
-        <span className="eyebrow">ONE SMALL STEP</span>
-        <DialogTitle className="dialog-title">今日の学びを残す</DialogTitle>
-        <DialogDescription className="dialog-description">
-          わかったこと、次に考えたいこと。一言でも大丈夫。
-        </DialogDescription>
-        <form className="form-stack" onSubmit={submit}>
-          <div>
-            <label htmlFor="study-note">
-              学習内容 <span className="required-label">必須</span>
-            </label>
-            <textarea
-              id="study-note"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              required
-              maxLength={1000}
-              rows={5}
-              placeholder="例：革命前のフランス社会を整理した。"
-              disabled={saving}
-            />
-            <p className="input-hint">
-              {note.length} / 1,000文字 · 現在の日時で記録します
-            </p>
-          </div>
-          {error && (
-            <p role="alert" className="form-error">
-              {error}
-            </p>
-          )}
-          <div className="form-actions">
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => onOpenChange(false)}
-              disabled={saving}
-            >
-              キャンセル
-            </Button>
-            <Button type="submit" disabled={saving}>
-              {saving ? "保存中…" : "学習を保存"}
-            </Button>
-          </div>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <div>
+        <label htmlFor="study-note">学習内容</label>
+        <textarea
+          id="study-note"
+          required
+          rows={7}
+          maxLength={1000}
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={saving}
+        />
+      </div>
+    </EditorDialog>
   );
 }
