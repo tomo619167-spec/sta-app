@@ -1,5 +1,7 @@
 import type {
   Subject,
+  StudyTarget,
+  RecordOptions,
   StudyItem,
   StudyRecord,
   Theme,
@@ -15,12 +17,17 @@ export interface StudyRepository {
   updateTheme(id: string, input: ThemeInput): Promise<Theme>;
   deleteTheme(id: string): Promise<void>;
   listItems(themeId?: string): Promise<StudyItem[]>;
-  createItem(themeId: string, title: string): Promise<StudyItem>;
+  createItem(themeId: string, title: string, goal?: string): Promise<StudyItem>;
   updateItem(
     id: string,
-    input: { title: string; completed: boolean },
+    input: { title: string; completed: boolean; goal?: string },
   ): Promise<StudyItem>;
   deleteItem(id: string): Promise<void>;
   listRecords(themeId?: string): Promise<StudyRecord[]>;
-  addRecord(themeId: string, note: string): Promise<StudyRecord>;
+  listTargetRecords(target: StudyTarget): Promise<StudyRecord[]>;
+  addRecord(
+    themeId: string,
+    note: string,
+    options?: RecordOptions,
+  ): Promise<StudyRecord>;
 }

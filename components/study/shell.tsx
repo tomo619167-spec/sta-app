@@ -62,13 +62,18 @@ export function Shell({ children }: { children: React.ReactNode }) {
             key={href}
             href={href}
             aria-current={
-              path === href || (href === "/" && path.startsWith("/themes"))
+              path === href ||
+              (href === "/" &&
+                (path.startsWith("/themes") || path.startsWith("/subjects")))
                 ? "page"
                 : undefined
             }
             className={cn(
               "nav-link",
-              (path === href || (href === "/" && path.startsWith("/themes"))) &&
+              (path === href ||
+                (href === "/" &&
+                  (path.startsWith("/themes") ||
+                    path.startsWith("/subjects")))) &&
                 "active",
             )}
           >

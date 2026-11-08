@@ -34,7 +34,7 @@ export function Progress({
       <div className="progress-label">
         <span>
           {value.total
-            ? `${value.completed} / ${value.total} 項目`
+            ? `習得済み ${value.completed} / ${value.total} 項目`
             : "学習項目なし"}
         </span>
         <span className="progress-number">
@@ -71,10 +71,12 @@ export function RecordList({
   records,
   themes,
   showTheme = false,
+  items = [],
 }: {
   records: StudyRecord[];
   themes: { id: string; name: string }[];
   showTheme?: boolean;
+  items?: { id: string; title: string }[];
 }) {
   return (
     <ol className="record-list">
@@ -92,6 +94,16 @@ export function RecordList({
                   <ArrowUpRight size={13} />
                 </Link>
               )}
+              <div className="record-meta">
+                <span>
+                  {record.targetType === "item"
+                    ? `項目 · ${items.find((item) => item.id === record.targetId)?.title ?? "削除済みの項目"}`
+                    : "テーマ全体"}
+                </span>
+                {record.completion !== undefined && (
+                  <span>完成度 {record.completion}%</span>
+                )}
+              </div>
               <p>{record.note}</p>
             </div>
           </li>

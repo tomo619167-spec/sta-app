@@ -3,7 +3,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDB } from "idb";
 import { IndexedDBStudyRepository } from "../lib/storage/indexed-db";
-import { progress, type LegacyTheme } from "../lib/model";
+import { latestCompletion, progress, type LegacyTheme } from "../lib/model";
 const connections: IndexedDBStudyRepository[] = [];
 function repository(name = crypto.randomUUID()) {
   const repo = new IndexedDBStudyRepository(name);
@@ -81,17 +81,25 @@ test("v1 migration retains every original field, records, roadmap and a byte-equ
     themes.find((t) => t.id === "theme-a")!.subjectId,
     themes.find((t) => t.id === "theme-b")!.subjectId,
   );
-  assert.deepEqual(await repo.listRecords(), [record]);
+  assert.deepEqual(await repo.listRecords(), [
+    {
+      ...record,
+      targetType: "theme",
+      targetId: record.themeId,
+      activity: "memo",
+    },
+  ]);
   assert.deepEqual(progress(await repo.listItems("theme-a")), {
     total: 2,
     completed: 1,
     percent: 50,
   });
   await repo.close();
-  const db = await openDB(name, 2);
+  const db = await openDB(name, 3);
   for (const original of others)
     assert.deepEqual(await db.get("legacy-themes-v1", original.id), original);
   db.close();
+  assert.equal((await repo.listItems())[0].goal, "");
   const reopened = repository(name);
   assert.equal((await reopened.listItems()).length, 2);
   assert.equal((await reopened.listSubjects()).length, 2);
@@ -217,4 +225,226 @@ test("a failed theme timestamp write rolls back the study record atomically", as
   }
   assert.deepEqual(await repo.listRecords(), []);
   assert.equal((await repo.getTheme(theme.id))!.lastStudiedAt, null);
+});
+async function seedV2(name: string) {
+  const db = await openDB(name, 2, {
+    upgrade(db) {
+      db.createObjectStore("subjects", { keyPath: "id" }).createIndex(
+        "by-name",
+        "normalizedName",
+        { unique: true },
+      );
+      db.createObjectStore("themes", { keyPath: "id" }).createIndex(
+        "by-subject",
+        "subjectId",
+      );
+      db.createObjectStore("items", { keyPath: "id" }).createIndex(
+        "by-theme",
+        "themeId",
+      );
+      db.createObjectStore("records", { keyPath: "id" }).createIndex(
+        "by-theme",
+        "themeId",
+      );
+      db.createObjectStore("legacy-themes-v1", { keyPath: "id" });
+    },
+  });
+  const subject = {
+    id: "s1",
+    name: "世界史",
+    normalizedName: "世界史",
+    createdAt: legacy.createdAt,
+    updatedAt: legacy.updatedAt,
+  };
+  const theme = { ...legacy, subjectId: subject.id };
+  const item = {
+    id: "item-1",
+    themeId: theme.id,
+    title: "原因",
+    completed: true,
+    position: 0,
+    createdAt: legacy.createdAt,
+    updatedAt: legacy.updatedAt,
+  };
+  const record = {
+    id: "v2-record",
+    themeId: theme.id,
+    note: "既存の記録\nそのまま残す",
+    studiedAt: legacy.lastStudiedAt!,
+  };
+  const tx = db.transaction(
+    ["subjects", "themes", "items", "records"],
+    "readwrite",
+  );
+  await tx.objectStore("subjects").add(subject);
+  await tx.objectStore("themes").add(theme);
+  await tx.objectStore("items").add(item);
+  await tx.objectStore("records").add(record);
+  await tx.done;
+  db.close();
+  return { subject, theme, item, record };
+}
+test("v2 upgrades preserve subjects, themes, mastery and original records with theme targeting", async () => {
+  const name = crypto.randomUUID();
+  const old = await seedV2(name);
+  const repo = repository(name);
+  assert.deepEqual(await repo.listSubjects(), [old.subject]);
+  assert.deepEqual(await repo.getTheme(old.theme.id), old.theme);
+  assert.deepEqual(await repo.listItems(), [{ ...old.item, goal: "" }]);
+  assert.deepEqual(await repo.listRecords(), [
+    {
+      ...old.record,
+      targetType: "theme",
+      targetId: old.theme.id,
+      activity: "memo",
+    },
+  ]);
+  assert.deepEqual(
+    await repo.listTargetRecords({ type: "item", id: old.item.id }),
+    [],
+  );
+  await repo.close();
+  const db = await openDB(name, 3);
+  assert.deepEqual(
+    await db.get("legacy-records-v2", old.record.id),
+    old.record,
+  );
+  db.close();
+  assert.equal((await repo.listRecords()).length, 1);
+});
+test("a failed v3 migration restores v2 and its records; retry is safe", async () => {
+  const name = crypto.randomUUID();
+  const old = await seedV2(name);
+  const originalUpdate = IDBCursor.prototype.update;
+  IDBCursor.prototype.update = function (
+    ...args: Parameters<IDBCursor["update"]>
+  ) {
+    if (this.source.name === "records")
+      throw new DOMException("Quota test", "QuotaExceededError");
+    return originalUpdate.apply(this, args);
+  };
+  const repo = repository(name);
+  try {
+    await assert.rejects(repo.listRecords());
+  } finally {
+    IDBCursor.prototype.update = originalUpdate;
+  }
+  const db = await openDB(name, 2);
+  assert.equal(db.version, 2);
+  assert.deepEqual(await db.get("records", old.record.id), old.record);
+  assert.deepEqual(await db.get("items", old.item.id), old.item);
+  assert.equal(db.objectStoreNames.contains("legacy-records-v2"), false);
+  db.close();
+  assert.equal(
+    (await repo.listTargetRecords({ type: "theme", id: old.theme.id })).length,
+    1,
+  );
+});
+test("theme and item completion are independent and never change roadmap mastery", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const item = await repo.createItem(theme.id, "原因", "背景を説明できる");
+  const themeRecord = await repo.addRecord(theme.id, "テーマの学び", {
+    completion: 20,
+    activity: "output",
+  });
+  const itemRecord = await repo.addRecord(theme.id, "項目の学び", {
+    target: { type: "item", id: item.id },
+    completion: 90,
+    activity: "deepen",
+  });
+  const records = await repo.listRecords(theme.id);
+  assert.equal(themeRecord.targetType, "theme");
+  assert.equal(themeRecord.targetId, theme.id);
+  assert.equal(itemRecord.targetType, "item");
+  assert.equal(latestCompletion(records, { type: "theme", id: theme.id }), 20);
+  assert.equal(latestCompletion(records, { type: "item", id: item.id }), 90);
+  assert.equal(
+    (await repo.listTargetRecords({ type: "theme", id: theme.id })).length,
+    1,
+  );
+  assert.equal(
+    (await repo.listTargetRecords({ type: "item", id: item.id })).length,
+    1,
+  );
+  assert.deepEqual(progress(await repo.listItems()), {
+    total: 1,
+    completed: 0,
+    percent: 0,
+  });
+  await repo.updateItem(item.id, { title: "革命の原因", completed: true });
+  assert.equal((await repo.listItems())[0].goal, "背景を説明できる");
+  await repo.close();
+  assert.equal(
+    latestCompletion(await repo.listRecords(), { type: "theme", id: theme.id }),
+    20,
+  );
+});
+test("zero and omitted completion are distinguished; invalid or mismatched targets do not save", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const item = await repo.createItem(theme.id, "原因");
+  const other = await repo.createTheme({ ...input, name: "別テーマ" });
+  await repo.addRecord(theme.id, "0の完成度", { completion: 0 });
+  await repo.addRecord(theme.id, "未設定の完成度", {
+    target: { type: "item", id: item.id },
+  });
+  assert.equal(
+    latestCompletion(await repo.listRecords(), { type: "theme", id: theme.id }),
+    0,
+  );
+  assert.equal(
+    latestCompletion(await repo.listRecords(), { type: "item", id: item.id }),
+    undefined,
+  );
+  for (const completion of [-1, 101, NaN, Infinity, 1.5])
+    await assert.rejects(repo.addRecord(theme.id, "不正値", { completion }));
+  await assert.rejects(
+    repo.addRecord(other.id, "別テーマの項目", {
+      target: { type: "item", id: item.id },
+    }),
+  );
+  await assert.rejects(
+    repo.addRecord(theme.id, "不正なテーマ", {
+      target: { type: "theme", id: other.id },
+    }),
+  );
+  await assert.rejects(
+    repo.addRecord(theme.id, "削除済み項目", {
+      target: { type: "item", id: "missing" },
+    }),
+  );
+  assert.equal((await repo.listRecords()).length, 2);
+});
+test("deleting an item removes only its scoped records; goals validate without data loss", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const first = await repo.createItem(theme.id, "原因", "説明できる");
+  const second = await repo.createItem(theme.id, "影響");
+  await repo.addRecord(theme.id, "テーマの記録");
+  await repo.addRecord(theme.id, "削除する記録", {
+    target: { type: "item", id: first.id },
+  });
+  await repo.addRecord(theme.id, "残す項目記録", {
+    target: { type: "item", id: second.id },
+  });
+  await assert.rejects(
+    repo.updateItem(first.id, {
+      title: first.title,
+      completed: false,
+      goal: "a".repeat(1001),
+    }),
+  );
+  assert.equal((await repo.listItems())[0].goal, "説明できる");
+  await repo.deleteItem(first.id);
+  assert.equal((await repo.listRecords()).length, 2);
+  assert.equal(
+    (await repo.listTargetRecords({ type: "item", id: first.id })).length,
+    0,
+  );
+  await assert.rejects(
+    repo.addRecord(theme.id, "古いフォーム", {
+      target: { type: "item", id: first.id },
+    }),
+  );
 });

@@ -17,12 +17,14 @@ export function ItemForm({
 }) {
   const { refresh } = useStudy();
   const [title, setTitle] = useState("");
+  const [goal, setGoal] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) {
       setTitle(item?.title ?? "");
+      setGoal(item?.goal ?? "");
       setError("");
     }
     wasOpen.current = open;
@@ -36,9 +38,10 @@ export function ItemForm({
       if (item)
         await studyRepository.updateItem(item.id, {
           title,
+          goal,
           completed: item.completed,
         });
-      else await studyRepository.createItem(themeId, title);
+      else await studyRepository.createItem(themeId, title, goal);
       await refresh();
       onClose();
     } catch (error) {
@@ -71,6 +74,20 @@ export function ItemForm({
           onChange={(e) => setTitle(e.target.value)}
           disabled={busy}
           placeholder="革命が起きた原因"
+        />
+      </div>
+      <div>
+        <label htmlFor="item-goal">
+          到達目標 <span className="optional-label">任意</span>
+        </label>
+        <textarea
+          id="item-goal"
+          maxLength={1000}
+          rows={4}
+          value={goal}
+          onChange={(e) => setGoal(e.target.value)}
+          disabled={busy}
+          placeholder="自分の言葉で説明できる"
         />
       </div>
     </EditorDialog>
