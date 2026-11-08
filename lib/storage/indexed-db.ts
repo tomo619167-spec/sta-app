@@ -1,5 +1,24 @@
+import {
+  validateLearningDraft,
+  validateLearningInput,
+  recordRevision,
+  recordSnapshot,
+  type LearningDraft,
+} from "../learning";
+import {
+  parseFeedbackJSON,
+  validateFeedbackDraft,
+  assertFeedbackContext,
+  type FeedbackDraft,
+  type LearningFeedback,
+} from "../learning-feedback";
 import { validateRoadmapDraft, type RoadmapDraft } from "../roadmap-draft";
-import { openDB, type DBSchema, type IDBPDatabase } from "idb";
+import {
+  openDB,
+  type DBSchema,
+  type IDBPTransaction,
+  type IDBPDatabase,
+} from "idb";
 import {
   normalizeSubject,
   type MasteryChange,
@@ -34,6 +53,26 @@ import {
 import { sortStudyItems } from "../roadmap";
 import type { StudyRepository } from "./repository";
 interface StudyDB extends DBSchema {
+  "learning-drafts": {
+    key: string;
+    value: LearningDraft;
+    indexes: { "by-theme": string; "by-target": ["theme" | "item", string] };
+  };
+  "learning-feedback": {
+    key: string;
+    value: LearningFeedback;
+    indexes: {
+      "by-theme": string;
+      "by-target": ["theme" | "item", string];
+      "by-record": string;
+    };
+  };
+  "feedback-drafts": {
+    key: string;
+    value: FeedbackDraft;
+    indexes: { "by-theme": string; "by-target": ["theme" | "item", string] };
+  };
+
   "roadmap-drafts": { key: string; value: RoadmapDraft };
   "subject-icons": { key: string; value: SubjectIconSetting };
   "mastery-history": {
@@ -56,6 +95,38 @@ interface StudyDB extends DBSchema {
   };
   "legacy-themes-v1": { key: string; value: LegacyTheme };
 }
+const learningStores = [
+  "themes",
+  "items",
+  "records",
+  "learning-drafts",
+  "learning-feedback",
+  "feedback-drafts",
+] as const;
+type LearningTransaction = IDBPTransaction<
+  StudyDB,
+  typeof learningStores,
+  "readwrite"
+>;
+async function learningTarget(
+  tx: LearningTransaction,
+  themeId: string,
+  target: StudyTarget,
+) {
+  const theme = await tx.objectStore("themes").get(themeId);
+  if (!theme) throw new Error("テーマが見つかりません。");
+  if (
+    !["theme", "item"].includes(target.type) ||
+    (target.type === "theme" && target.id !== themeId)
+  )
+    throw new Error("学習対象が一致しません。");
+  if (target.type === "item") {
+    const item = await tx.objectStore("items").get(target.id);
+    if (!item || item.themeId !== themeId)
+      throw new Error("学習項目が見つからないか、別のテーマに属しています。");
+  }
+  return theme;
+}
 async function abortTransaction(tx: { abort(): void; done: Promise<unknown> }) {
   try {
     tx.abort();
@@ -69,7 +140,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
   constructor(private readonly name = "yohaku-study") {}
   private db() {
     if (!this.connection)
-      this.connection = openDB<StudyDB>(this.name, 5, {
+      this.connection = openDB<StudyDB>(this.name, 6, {
         upgrade(db, oldVersion, _newVersion, tx) {
           // The open request reports upgrade failures; also consume tx.done.
           void tx.done.catch(() => {});
@@ -175,6 +246,21 @@ export class IndexedDBStudyRepository implements StudyRepository {
                 /* already aborted */
               }
             });
+          }
+          if (oldVersion < 6) {
+            for (const [name, keyPath] of [
+              ["learning-drafts", "key"],
+              ["learning-feedback", "id"],
+              ["feedback-drafts", "recordId"],
+            ] as const) {
+              const store = db.createObjectStore(name, { keyPath });
+              store.createIndex("by-theme", "themeId");
+              store.createIndex("by-target", ["targetType", "targetId"]);
+            }
+            tx.objectStore("learning-feedback").createIndex(
+              "by-record",
+              "recordId",
+            );
           }
           if (oldVersion < 5) {
             // Additive only: all existing learning data remains untouched.
@@ -487,6 +573,9 @@ export class IndexedDBStudyRepository implements StudyRepository {
         "records",
         "legacy-themes-v1",
         "roadmap-drafts",
+        "learning-drafts",
+        "learning-feedback",
+        "feedback-drafts",
         "legacy-records-v2",
         "mastery-history",
       ],
@@ -498,6 +587,9 @@ export class IndexedDBStudyRepository implements StudyRepository {
         "records",
         "legacy-records-v2",
         "mastery-history",
+        "learning-drafts",
+        "learning-feedback",
+        "feedback-drafts",
       ] as const) {
         const keys = await tx
           .objectStore(name)
@@ -579,7 +671,14 @@ export class IndexedDBStudyRepository implements StudyRepository {
   }
   async deleteItem(id: string) {
     const tx = (await this.db()).transaction(
-      ["items", "records", "mastery-history"],
+      [
+        "items",
+        "records",
+        "mastery-history",
+        "learning-drafts",
+        "learning-feedback",
+        "feedback-drafts",
+      ],
       "readwrite",
     );
     try {
@@ -594,6 +693,17 @@ export class IndexedDBStudyRepository implements StudyRepository {
         .getAllKeys(["item", id]);
       for (const key of historyKeys)
         await tx.objectStore("mastery-history").delete(key);
+      for (const name of [
+        "learning-drafts",
+        "learning-feedback",
+        "feedback-drafts",
+      ] as const) {
+        const keys = await tx
+          .objectStore(name)
+          .index("by-target")
+          .getAllKeys(["item", id]);
+        for (const key of keys) await tx.objectStore(name).delete(key);
+      }
       await tx.objectStore("items").delete(id);
       await tx.done;
     } catch (error) {
@@ -667,6 +777,180 @@ export class IndexedDBStudyRepository implements StudyRepository {
         .put({ ...theme, lastStudiedAt: now, updatedAt: now });
       await tx.done;
       return record;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async getLearningDraft(key: string) {
+    const draft = await (await this.db()).get("learning-drafts", key);
+    return draft ? validateLearningDraft(draft) : undefined;
+  }
+  async saveLearningDraft(draft: LearningDraft) {
+    const value = validateLearningDraft(draft);
+    const tx = (await this.db()).transaction(learningStores, "readwrite");
+    try {
+      await learningTarget(tx, value.themeId, {
+        type: value.targetType,
+        id: value.targetId,
+      });
+      if (value.recordId) {
+        const record = await tx.objectStore("records").get(value.recordId);
+        if (
+          !record ||
+          record.themeId !== value.themeId ||
+          record.targetType !== value.targetType ||
+          record.targetId !== value.targetId ||
+          record.activity !== value.activity
+        )
+          throw new Error("記録が見つかりません。");
+      }
+      await tx.objectStore("learning-drafts").put(value);
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async saveLearningRecord(draft: LearningDraft) {
+    const value = validateLearningDraft(draft);
+    const input = validateLearningInput(value);
+    const tx = (await this.db()).transaction(learningStores, "readwrite");
+    try {
+      const theme = await learningTarget(tx, value.themeId, {
+        type: value.targetType,
+        id: value.targetId,
+      });
+      const old = value.recordId
+        ? await tx.objectStore("records").get(value.recordId)
+        : undefined;
+      if (
+        value.recordId &&
+        (!old ||
+          old.themeId !== value.themeId ||
+          old.targetId !== value.targetId ||
+          old.targetType !== value.targetType ||
+          old.activity !== value.activity)
+      )
+        throw new Error("記録が見つかりません。");
+      if (old && value.baseRevision !== recordRevision(old))
+        throw new Error(
+          "記録が更新されています。画面を開き直して確認してください。",
+        );
+      const now = new Date(
+        Math.max(Date.now(), old ? Date.parse(recordRevision(old)) + 1 : 0),
+      ).toISOString();
+      const record: StudyRecord = {
+        ...old,
+        id: old?.id ?? crypto.randomUUID(),
+        themeId: value.themeId,
+        targetType: value.targetType,
+        targetId: value.targetId,
+        ...input,
+        note:
+          input.activity === "output"
+            ? input.note.trim()
+            : [input.question, input.hypothesis, input.insight]
+                .filter(Boolean)
+                .join("\n\n"),
+        studiedAt: old?.studiedAt ?? now,
+        createdAt: old?.createdAt ?? old?.studiedAt ?? now,
+        updatedAt: now,
+      };
+      await tx.objectStore("records").put(record);
+      await tx.objectStore("themes").put({
+        ...theme,
+        lastStudiedAt: old ? theme.lastStudiedAt : now,
+        updatedAt: now,
+      });
+      await tx.objectStore("learning-drafts").delete(value.key);
+      await tx.done;
+      return record;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async deleteRecord(id: string) {
+    const tx = (await this.db()).transaction(learningStores, "readwrite");
+    try {
+      for (const key of await tx
+        .objectStore("learning-feedback")
+        .index("by-record")
+        .getAllKeys(id))
+        await tx.objectStore("learning-feedback").delete(key);
+      for (const draft of await tx.objectStore("learning-drafts").getAll())
+        if (draft.recordId === id)
+          await tx.objectStore("learning-drafts").delete(draft.key);
+      await tx.objectStore("feedback-drafts").delete(id);
+      await tx.objectStore("records").delete(id);
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async listFeedbacks() {
+    return (await (await this.db()).getAll("learning-feedback")).sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    );
+  }
+  async getFeedbackDraft(recordId: string) {
+    const draft = await (await this.db()).get("feedback-drafts", recordId);
+    return draft ? validateFeedbackDraft(draft) : undefined;
+  }
+  async saveFeedbackDraft(draft: FeedbackDraft) {
+    validateFeedbackDraft(draft);
+    const tx = (await this.db()).transaction(learningStores, "readwrite");
+    try {
+      await learningTarget(tx, draft.themeId, {
+        type: draft.targetType,
+        id: draft.targetId,
+      });
+      const record = await tx.objectStore("records").get(draft.recordId);
+      if (
+        !record ||
+        record.activity === "memo" ||
+        record.themeId !== draft.themeId ||
+        record.targetType !== draft.targetType ||
+        record.targetId !== draft.targetId ||
+        recordRevision(record) !== draft.revision
+      )
+        throw new Error(
+          "記録が変更されています。プロンプトを作り直してください。",
+        );
+      await tx.objectStore("feedback-drafts").put(draft);
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async importFeedback(recordId: string, source: string) {
+    const document = parseFeedbackJSON(source);
+    const tx = (await this.db()).transaction(learningStores, "readwrite");
+    try {
+      const record = await tx.objectStore("records").get(recordId);
+      if (!record) throw new Error("記録が見つかりません。");
+      await learningTarget(tx, record.themeId, {
+        type: record.targetType,
+        id: record.targetId,
+      });
+      assertFeedbackContext(document, record);
+      const entry: LearningFeedback = {
+        id: crypto.randomUUID(),
+        themeId: record.themeId,
+        recordId,
+        targetType: record.targetType,
+        targetId: record.targetId,
+        createdAt: new Date().toISOString(),
+        document,
+        snapshot: recordSnapshot(record),
+      };
+      await tx.objectStore("learning-feedback").add(entry);
+      await tx.objectStore("feedback-drafts").delete(recordId);
+      await tx.done;
+      return entry;
     } catch (error) {
       await abortTransaction(tx);
       throw error;

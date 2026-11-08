@@ -59,6 +59,12 @@ export interface StudyRecord extends LegacyStudyRecord {
   /** Legacy percentage, retained verbatim. Never converted to a four-level rating. */
   completion?: number;
   outputRating?: FourLevel;
+  createdAt?: string;
+  updatedAt?: string;
+  questionKind?: import("./learning").QuestionKind;
+  question?: string;
+  hypothesis?: string;
+  insight?: string;
 }
 export interface RecordOptions {
   target?: StudyTarget;

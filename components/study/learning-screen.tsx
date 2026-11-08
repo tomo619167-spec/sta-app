@@ -12,7 +12,8 @@ import {
 } from "@/lib/learning-context";
 import { useStudy } from "./provider";
 import { BackLink, RecordList } from "./shared";
-import { RecordForm } from "./record-form";
+import { LearningEditor } from "./learning-editor";
+import { useRouter } from "next/navigation";
 export function LearningScreen({
   themeId,
   feature,
@@ -24,6 +25,7 @@ export function LearningScreen({
   itemId?: string;
   fromTheme?: boolean;
 }) {
+  const router = useRouter();
   const { themes, items, records } = useStudy();
   const [open, setOpen] = useState(false);
   const theme = themes.find((theme) => theme.id === themeId);
@@ -71,7 +73,12 @@ export function LearningScreen({
           {resolved.target.type === "theme" ? "テーマ全体" : "学習項目"}
         </span>
         <h2>{resolved.name}</h2>
-        {resolved.item?.goal && <p>{resolved.item.goal}</p>}
+        {(resolved.item?.goal ?? theme.description) && (
+          <details className="learning-goal">
+            <summary>到達目標を確認</summary>
+            <p>{resolved.item?.goal ?? theme.description}</p>
+          </details>
+        )}
         {feature === "output" && (
           <div className="completion-summary">
             <span>直近のアウトプット</span>
@@ -84,9 +91,7 @@ export function LearningScreen({
         target={resolved.target}
         name={resolved.name}
       />
-      <p className="feature-notice">
-        専用機能は準備中です。学習メモは記録できます。
-      </p>
+
       <Button onClick={() => setOpen(true)}>
         <Plus />
         学習を記録
@@ -101,15 +106,21 @@ export function LearningScreen({
           <p className="quiet-empty">まだ記録はありません。</p>
         )}
       </section>
-      <RecordForm
-        key={`${resolved.target.type}:${resolved.target.id}:${feature}`}
-        themeId={themeId}
-        target={resolved.target}
-        targetName={resolved.name}
-        activity={feature}
-        open={open}
-        onOpenChange={setOpen}
-      />
+      {open && (
+        <LearningEditor
+          key={`${resolved.target.type}:${resolved.target.id}:${feature}`}
+          themeId={themeId}
+          target={resolved.target}
+          name={resolved.name}
+          goal={resolved.item?.goal ?? theme.description}
+          activity={feature}
+          open={open}
+          onClose={() => setOpen(false)}
+          onSaved={(record, ai) => {
+            if (ai) router.push(`/records/${record.id}?ai=1`);
+          }}
+        />
+      )}
     </>
   );
 }

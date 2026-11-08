@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/roadmap-ai-flow
+git checkout codex/phase-3-learning
 npm install
 npm run dev
 ```
@@ -44,15 +44,19 @@ npm start
 - 科目アイコン：科目名から自動選択。「… → 科目を管理 → 科目の… → アイコンを変更」で手動変更・自動へ戻す
 - 習得度：テーマ名付近のバッジで確認。「テーマの… → 習得度を変更」で更新。項目・学習画面からも選択でき、変更履歴を保存
 - アウトプット：今回の説明を任意の4段階で評価。各回の日時・内容・評価を履歴表示し、記録画面で対象・種類を絞り込み可能
+- アウトプット本文は30,000文字まで。到達目標は必要な時だけ開き、対象別に下書きを自動保存・復元
+- 理解を深める：5種類の問い、自分の問い・仮説・気づきを記録。仮説まで保存して外部AIに相談し、後から気づきを編集できる
+- 記録を開く：本文の閲覧、完成度の確認、編集・確認付き削除。科目・テーマ・項目で絞り込み、項目のロードマップから記録へ移動
+- AIフィードバック：コピー → 結果の貼り付け → JSONプレビュー → 保存。作業途中も復元し、自己評価・習得度・自分の気づきと分離
 - スマホ入力：既存の全画面フォーム・VisualViewport対応を再利用
 
-アウトプットの専用編集、理解を深める専用ワークフローは準備中です。対象を確認して既存の学習メモを残せる段階です。過去問・ポモドーロタイマー自体も準備中で、アプリ内AIは搭載しません。
+過去問・ポモドーロタイマーは準備中です。アプリ内AI・独自の音声認識APIは搭載しません。テキスト欄は端末の標準キーボードの音声入力を利用できる構成ですが、実機での音声入力は未検証です。
 
 通常のテーマ詳細の学習導線は維持し、作成ツールはロードマップ管理画面に集約しています。「次に取り組む」は表示順の未着手・学習中を優先し、該当がなければ未評価の項目を表示します。どの項目も一覧から自由に選べます。
 
 ## 保存構造・移行
 
-同じ`yohaku-study`をIndexedDB **v5**へ自動移行します。ブラウザデータを消去せず、同じオリジン・同じブラウザで更新してください。
+同じ`yohaku-study`をIndexedDB **v6**へ自動移行します。ブラウザデータを消去せず、同じオリジン・同じブラウザで更新してください。
 
 | ストア            | 内容                                                           |
 | ----------------- | -------------------------------------------------------------- |
@@ -63,18 +67,23 @@ npm start
 | subject-icons     | 科目ID、アイコン、自動／手動、更新日時                         |
 | mastery-history   | 連番ID、対象種別・ID、習得度、変更日時                         |
 | roadmap-drafts    | テーマ別の入力・生成プロンプト・コピー済み状態・JSON・ステップ |
+| learning-drafts   | 対象・活動別の本文、評価、問い・仮説・気づきの下書き           |
+| learning-feedback | 記録別のAIフィードバック、対象、元の本文と版                   |
+| feedback-drafts   | 記録別のプロンプト・JSON・ステップの一時保存                   |
 | legacy-themes-v1  | v1テーマ原本                                                   |
 | legacy-records-v2 | 対象情報を追加する前の記録原本                                 |
 
 v2からは、テーマ・科目・項目のIDと記録の本文・日時を維持し、項目に未設定の到達目標を追加します。記録原本を退避して、旧記録には`targetType: theme`、`targetId: 旧themeId`、`activity: memo`を付加します。旧記録に完成度を捏造しません。
 
-v1からは既存の科目・項目への移行後、同じトランザクションでv5まで進みます。移行の失敗は全体をロールバックし、元のバージョンでデータが残ります。成功後の再読み込みで二重移行しません。
+v1からは既存の科目・項目への移行後、同じトランザクションでv6まで進みます。移行の失敗は全体をロールバックし、元のバージョンでデータが残ります。成功後の再読み込みで二重移行しません。
 
 v3→v4では既存6ストアを更新せず、科目アイコンと習得度履歴のストアを追加します。既存科目のアイコンを初期設定し、旧％評価・旧習得済みを新評価へ変換しません。新評価はユーザーが選ぶまで「未評価」です。
 
 Phase 2本体のスキーマ変更はありませんでした。テーマの既存の学習目標（`description`）と`items`を再利用し、別のロードマップデータは作りません。JSON取り込みはIDを新規発行し、既存項目・評価・記録を更新しません。新項目の習得度は未評価です。
 
 v4→v5では`roadmap-drafts`ストアのみを追加し、既存8ストアの行は書き換えません。下書きはテーマIDをキーに保存し、項目の登録と同じトランザクションで削除します。登録失敗時は項目追加と下書き削除をまとめて取り消します。テーマ削除時はその下書きも削除します。
+
+v5→v6では学習ドラフト・AIフィードバック・AI作業ドラフトの3ストアだけを追加し、既存9ストアの行は変更しません。正式保存と対応する下書き削除は同じトランザクションです。AIの内容を評価や気づきへ自動反映しません。既存の記録に新しい日時・評価・問いを自動付与しません。
 
 ### 習得度とアウトプット完成度
 
@@ -90,7 +99,10 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 
 - `lib/model.ts`：データ型、入力検証、名前の正規化、進捗
 - `lib/storage/repository.ts`：保存処理のインターフェース
-- `lib/storage/indexed-db.ts`：IndexedDB v5アダプターとv1〜v4移行
+- `lib/storage/indexed-db.ts`：IndexedDB v6アダプターとv1〜v5移行
+- `lib/learning.ts`：対象別の学習入力・下書き・記録の版
+- `lib/learning-feedback.ts`：外部AIプロンプト、version 1のJSON検証、フィードバックの型
+- `lib/json.ts`：ロードマップとフィードバックで共有するJSON検証
 - `lib/ratings.ts`：独立した評価基準、履歴の最新値、段階別集計
 - `lib/roadmap.ts`：表示順と次に取り組む項目
 - `lib/roadmap-draft.ts`：テーマ別の一時ドラフトの型・検証
@@ -99,6 +111,9 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `lib/storage/index.ts`：アダプター選択。将来Supabase対応をここで切り替え
 - `lib/learning-context.ts`：学習対象の解決と遷移URL。過去問は科目IDを主対象、テーマIDを任意の絞り込みとして扱う
 - `components/study/learning-screen.tsx`：テーマ・項目共通の学習画面
+- `components/study/learning-editor.tsx`：長文入力、4段階評価、問い・仮説・気づきと下書き保存
+- `components/study/record-detail.tsx`：記録の閲覧・編集・削除とAIフィードバック
+- `components/study/feedback-workflow.tsx`：外部AIとのコピー・JSON取り込みの共通フロー
 - `components/study/daily-actions.tsx`：共通の2ボタン
 - `components/study/roadmap-items.tsx`：項目の展開・習得状態・編集
 - `components/study/roadmap-manager.tsx`：到達目標・進捗・作成ツールの管理画面
@@ -123,7 +138,11 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 スマホのプロジェクトはタップ操作、PCはマウスクリックを使います。表示領域の縮小・移動を再現しますが、実機のOSキーボードを使うテストではありません。
 
-Phase 2導線統合では型チェック・ビルド・単体テスト35件・E2E 72件が成功しました。JSON検証、重複確認、一括追加のロールバック、並び替え、保存後の再読み込み、既存データ移行、テーマ別のドラフト復元を含みます。
+Phase 3では型チェック・ビルド・単体テスト45件・E2E 90件が成功しました。学習記録・評価・下書き・AI結果の保存と復元、JSON検証、編集競合、失敗時のロールバック、並び替え、既存データ移行、Phase 1〜2の回帰を含みます。
+
+実機の標準音声入力・IME・OSキーボード、外部AIサービスの実際の生成品質は自動テストに含みません。
+
+今回の学習機能・AI連携・データ仕様は[docs/phase-3.md](docs/phase-3.md)を参照してください。
 
 今回の統合フロー・下書き保存は[docs/roadmap-ai-flow.md](docs/roadmap-ai-flow.md)、ロードマップとJSON仕様は[docs/phase-2.md](docs/phase-2.md)、テーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 
@@ -133,7 +152,7 @@ Phase 2導線統合では型チェック・ビルド・単体テスト35件・E2
 
 ## 次の開発
 
-今後、アウトプット・理解を深める専用機能、過去問・演習、ポモドーロタイマー、クラウド同期を追加します。実機iOS Safari・Android Chromeでのソフトキーボード確認、デプロイは別途必要です。
+今後、過去問・演習、ポモドーロタイマー、クラウド同期を追加します。実機iOS Safari・Android Chromeでの標準音声入力とソフトキーボード確認、デプロイは別途必要です。
 
 ## 参考
 
