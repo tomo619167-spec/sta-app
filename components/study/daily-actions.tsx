@@ -1,0 +1,31 @@
+import Link from "next/link";
+import { PenLine, Lightbulb } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { learningHref } from "@/lib/learning-context";
+export function DailyActions({
+  themeId,
+  itemId,
+}: {
+  themeId: string;
+  itemId?: string;
+}) {
+  return (
+    <nav
+      className="daily-actions"
+      aria-label={itemId === undefined ? "テーマ全体の学習" : "項目の学習"}
+    >
+      <Button asChild variant="outline">
+        <Link href={learningHref(themeId, "output", itemId)}>
+          <PenLine />
+          <span>アウトプット</span>
+        </Link>
+      </Button>
+      <Button asChild variant="outline">
+        <Link href={learningHref(themeId, "deepen", itemId)}>
+          <Lightbulb />
+          <span>理解を深める</span>
+        </Link>
+      </Button>
+    </nav>
+  );
+}

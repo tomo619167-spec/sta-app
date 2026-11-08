@@ -1,6 +1,11 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import {
   normalizeSubject,
+  validateGoal,
+  validateCompletion,
+  type StudyTarget,
+  type RecordOptions,
+  type LegacyStudyRecord,
   validateSubject,
   validateTheme,
   validateItem,
@@ -16,7 +21,16 @@ interface StudyDB extends DBSchema {
   subjects: { key: string; value: Subject; indexes: { "by-name": string } };
   themes: { key: string; value: Theme; indexes: { "by-subject": string } };
   items: { key: string; value: StudyItem; indexes: { "by-theme": string } };
-  records: { key: string; value: StudyRecord; indexes: { "by-theme": string } };
+  records: {
+    key: string;
+    value: StudyRecord;
+    indexes: { "by-theme": string; "by-target": ["theme" | "item", string] };
+  };
+  "legacy-records-v2": {
+    key: string;
+    value: LegacyStudyRecord;
+    indexes: { "by-theme": string };
+  };
   "legacy-themes-v1": { key: string; value: LegacyTheme };
 }
 async function abortTransaction(tx: { abort(): void; done: Promise<unknown> }) {
@@ -32,10 +46,11 @@ export class IndexedDBStudyRepository implements StudyRepository {
   constructor(private readonly name = "yohaku-study") {}
   private db() {
     if (!this.connection)
-      this.connection = openDB<StudyDB>(this.name, 2, {
+      this.connection = openDB<StudyDB>(this.name, 3, {
         upgrade(db, oldVersion, _newVersion, tx) {
           // The open request reports upgrade failures; also consume tx.done.
           void tx.done.catch(() => {});
+          let migrateHierarchy: Promise<void> = Promise.resolve();
           if (oldVersion < 1) {
             db.createObjectStore("themes", { keyPath: "id" });
             db.createObjectStore("records", { keyPath: "id" }).createIndex(
@@ -57,7 +72,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
             tx.objectStore("themes").createIndex("by-subject", "subjectId");
             // No network/other async work inside this versionchange transaction.
             // A failed request aborts the entire upgrade, retaining the v1 database.
-            void (async () => {
+            migrateHierarchy = (async () => {
               const subjects = new Map<string, Subject>();
               let cursor = await tx.objectStore("themes").openCursor();
               while (cursor) {
@@ -82,6 +97,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
                   original.roadmap ?? []
                 ).entries()) {
                   await tx.objectStore("items").add({
+                    goal: "",
                     ...item,
                     id: `v1:${original.id}:${index}:${item.id}`,
                     themeId: original.id,
@@ -97,6 +113,42 @@ export class IndexedDBStudyRepository implements StudyRepository {
                 tx.abort();
               } catch {
                 /* request already aborted */
+              }
+            });
+          }
+          if (oldVersion < 3) {
+            const records = tx.objectStore("records");
+            records.createIndex("by-target", ["targetType", "targetId"]);
+            db.createObjectStore("legacy-records-v2", {
+              keyPath: "id",
+            }).createIndex("by-theme", "themeId");
+            void (async () => {
+              await migrateHierarchy;
+              let cursor = await records.openCursor();
+              while (cursor) {
+                const original = cursor.value;
+                await tx.objectStore("legacy-records-v2").add(original);
+                await cursor.update({
+                  ...original,
+                  targetType: original.targetType ?? "theme",
+                  targetId: original.targetId ?? original.themeId,
+                  activity: original.activity ?? "memo",
+                });
+                cursor = await cursor.continue();
+              }
+              let item = await tx.objectStore("items").openCursor();
+              while (item) {
+                await item.update({
+                  ...item.value,
+                  goal: item.value.goal ?? "",
+                });
+                item = await item.continue();
+              }
+            })().catch(() => {
+              try {
+                tx.abort();
+              } catch {
+                /* already aborted */
               }
             });
           }
@@ -225,11 +277,11 @@ export class IndexedDBStudyRepository implements StudyRepository {
   }
   async deleteTheme(id: string) {
     const tx = (await this.db()).transaction(
-      ["themes", "items", "records", "legacy-themes-v1"],
+      ["themes", "items", "records", "legacy-themes-v1", "legacy-records-v2"],
       "readwrite",
     );
     try {
-      for (const name of ["items", "records"] as const) {
+      for (const name of ["items", "records", "legacy-records-v2"] as const) {
         const keys = await tx
           .objectStore(name)
           .index("by-theme")
@@ -254,7 +306,8 @@ export class IndexedDBStudyRepository implements StudyRepository {
         a.position - b.position || a.createdAt.localeCompare(b.createdAt),
     );
   }
-  async createItem(themeId: string, title: string) {
+  async createItem(themeId: string, title: string, goal = "") {
+    const targetGoal = validateGoal(goal);
     const value = validateItem(title);
     const tx = (await this.db()).transaction(["themes", "items"], "readwrite");
     try {
@@ -268,6 +321,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
       const item: StudyItem = {
         id: crypto.randomUUID(),
         title: value,
+        goal: targetGoal,
         themeId,
         completed: false,
         position: Math.max(-1, ...items.map((item) => item.position)) + 1,
@@ -282,7 +336,12 @@ export class IndexedDBStudyRepository implements StudyRepository {
       throw error;
     }
   }
-  async updateItem(id: string, input: { title: string; completed: boolean }) {
+  async updateItem(
+    id: string,
+    input: { title: string; completed: boolean; goal?: string },
+  ) {
+    const goal =
+      input.goal === undefined ? undefined : validateGoal(input.goal);
     const title = validateItem(input.title);
     const tx = (await this.db()).transaction("items", "readwrite");
     try {
@@ -291,6 +350,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
       const updated = {
         ...item,
         title,
+        ...(goal === undefined ? {} : { goal }),
         completed: input.completed,
         updatedAt: new Date().toISOString(),
       };
@@ -303,7 +363,19 @@ export class IndexedDBStudyRepository implements StudyRepository {
     }
   }
   async deleteItem(id: string) {
-    await (await this.db()).delete("items", id);
+    const tx = (await this.db()).transaction(["items", "records"], "readwrite");
+    try {
+      const keys = await tx
+        .objectStore("records")
+        .index("by-target")
+        .getAllKeys(["item", id]);
+      for (const key of keys) await tx.objectStore("records").delete(key);
+      await tx.objectStore("items").delete(id);
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
   }
   async listRecords(themeId?: string) {
     const db = await this.db();
@@ -312,21 +384,49 @@ export class IndexedDBStudyRepository implements StudyRepository {
       : await db.getAll("records");
     return records.sort((a, b) => b.studiedAt.localeCompare(a.studiedAt));
   }
-  async addRecord(themeId: string, note: string) {
+  async listTargetRecords(target: StudyTarget) {
+    return (
+      await (
+        await this.db()
+      ).getAllFromIndex("records", "by-target", [target.type, target.id])
+    ).sort((a, b) => b.studiedAt.localeCompare(a.studiedAt));
+  }
+  async addRecord(themeId: string, note: string, options: RecordOptions = {}) {
+    const target = options.target ?? { type: "theme", id: themeId };
+    const completion = validateCompletion(options.completion);
+    const activity = options.activity ?? "memo";
+    if (
+      !["theme", "item"].includes(target.type) ||
+      !["memo", "output", "deepen"].includes(activity)
+    )
+      throw new Error("学習対象を確認してください。");
     const text = note.trim();
     if (!text || text.length > 1000)
       throw new Error("学習内容は1〜1,000文字で入力してください。");
     const tx = (await this.db()).transaction(
-      ["themes", "records"],
+      ["themes", "items", "records"],
       "readwrite",
     );
     try {
       const theme = await tx.objectStore("themes").get(themeId);
       if (!theme) throw new Error("テーマが見つかりません。");
+      if (target.type === "theme" && target.id !== themeId)
+        throw new Error("学習対象がテーマと一致しません。");
+      if (target.type === "item") {
+        const item = await tx.objectStore("items").get(target.id);
+        if (!item || item.themeId !== themeId)
+          throw new Error(
+            "学習項目が見つからないか、別のテーマに属しています。",
+          );
+      }
       const now = new Date().toISOString();
-      const record = {
+      const record: StudyRecord = {
         id: crypto.randomUUID(),
         themeId,
+        targetType: target.type,
+        targetId: target.id,
+        activity,
+        ...(completion === undefined ? {} : { completion }),
         note: text,
         studiedAt: now,
       };

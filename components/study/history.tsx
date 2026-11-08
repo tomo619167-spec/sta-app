@@ -10,12 +10,16 @@ export function HistoryScreen({
 }: {
   initialTheme?: string;
 }) {
-  const { records, themes } = useStudy();
+  const { records, themes, items } = useStudy();
   const [filter, setFilter] = useState(initialTheme);
+  const [targetFilter, setTargetFilter] = useState("");
   const selected = themes.some((theme) => theme.id === filter) ? filter : "";
-  const filtered = selected
+  const themeRecords = selected
     ? records.filter((record) => record.themeId === selected)
     : records;
+  const filtered = themeRecords.filter(
+    (record) => !targetFilter || record.targetType === targetFilter,
+  );
   return (
     <>
       <section className="page-intro">
@@ -36,13 +40,30 @@ export function HistoryScreen({
           ))}
         </select>
       </div>
+      <div className="history-filter">
+        <label htmlFor="history-target">学習対象</label>
+        <select
+          id="history-target"
+          value={targetFilter}
+          onChange={(e) => setTargetFilter(e.target.value)}
+        >
+          <option value="">すべての対象</option>
+          <option value="theme">テーマ全体</option>
+          <option value="item">学習項目</option>
+        </select>
+      </div>
       <div className="section-heading">
         <h2>
           学習記録 <span className="count">{filtered.length}</span>
         </h2>
       </div>
       {filtered.length ? (
-        <RecordList records={filtered} themes={themes} showTheme />
+        <RecordList
+          records={filtered}
+          themes={themes}
+          items={items}
+          showTheme
+        />
       ) : (
         <div className="empty-state">
           <History size={30} strokeWidth={1} />

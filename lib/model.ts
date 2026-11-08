@@ -27,14 +27,57 @@ export interface Theme extends LegacyTheme {
 export interface StudyItem extends RoadmapItem {
   themeId: string;
   position: number;
+  goal: string;
   createdAt: string;
   updatedAt: string;
 }
-export interface StudyRecord {
+export interface LegacyStudyRecord {
   id: string;
   themeId: string;
   note: string;
   studiedAt: string;
+}
+export type TargetType = "theme" | "item";
+export interface StudyTarget {
+  type: TargetType;
+  id: string;
+}
+export type LearningActivity = "memo" | "output" | "deepen";
+export interface StudyRecord extends LegacyStudyRecord {
+  targetType: TargetType;
+  targetId: string;
+  activity: LearningActivity;
+  completion?: number;
+}
+export interface RecordOptions {
+  target?: StudyTarget;
+  completion?: number;
+  activity?: LearningActivity;
+}
+export function validateGoal(goal: string) {
+  const value = goal.trim();
+  if (value.length > 1000)
+    throw new Error("到達目標は1,000文字以内で入力してください。");
+  return value;
+}
+export function validateCompletion(completion?: number) {
+  if (
+    completion !== undefined &&
+    (!Number.isInteger(completion) || completion < 0 || completion > 100)
+  )
+    throw new Error("完成度は0〜100の整数で入力してください。");
+  return completion;
+}
+/** Self-assessment is scoped to one target, independently of roadmap mastery. */
+export function latestCompletion(records: StudyRecord[], target: StudyTarget) {
+  return records
+    .filter(
+      (record) =>
+        record.targetType === target.type &&
+        record.targetId === target.id &&
+        record.completion !== undefined,
+    )
+    .sort((a, b) => b.studiedAt.localeCompare(a.studiedAt))[0]?.completion;
 }
 export interface ThemeInput {
   name: string;
