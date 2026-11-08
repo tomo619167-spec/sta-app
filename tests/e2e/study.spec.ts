@@ -376,6 +376,132 @@ async function saveLearning(page: Page, note: string, completion?: number) {
   await activate(page.getByRole("button", { name: "学習を保存" }));
   await expect(page.getByText(note, { exact: true })).toBeVisible();
 }
+test("TRACE Note reflects real mastery, three learning states and keeps v3 data unchanged on reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await expect(page).toHaveTitle(/TRACE Note/);
+  await expect(
+    page.getByRole("link", { name: "TRACE Note ホーム" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("img", { name: "全項目の習得率 0%" }),
+  ).toBeVisible();
+  await createTheme(page);
+  const themeUrl = page.url();
+  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
+  await addItem(page, "革命前の社会");
+  await activate(page.getByRole("checkbox", { name: /革命前の社会/ }));
+  await addItem(page, "革命が起きた原因");
+  await activate(
+    page
+      .getByRole("navigation", { name: "項目の学習" })
+      .last()
+      .getByRole("link", { name: "アウトプット", exact: true }),
+  );
+  await saveLearning(page, "財政難と身分制を整理", 90);
+  await activate(
+    page.getByRole("link", { name: "ロードマップに戻る", exact: true }),
+  );
+  await addItem(page, "革命の影響");
+  await expect(page.locator('[data-learning-state="mastered"]')).toHaveCount(1);
+  await expect(page.locator('[data-learning-state="in-progress"]')).toHaveCount(
+    1,
+  );
+  await expect(page.locator('[data-learning-state="not-started"]')).toHaveCount(
+    1,
+  );
+  await expect(page.getByRole("progressbar")).toHaveAttribute(
+    "aria-valuenow",
+    "33",
+  );
+  // Read every store, including original migration backups. Rendering must not rewrite any row.
+  async function snapshot() {
+    return page.evaluate(
+      async () =>
+        new Promise<unknown>((resolve, reject) => {
+          const request = indexedDB.open("yohaku-study");
+          request.onerror = () => reject(request.error);
+          request.onsuccess = () => {
+            const db = request.result;
+            const stores = Array.from(db.objectStoreNames);
+            const tx = db.transaction(stores, "readonly");
+            const rows: Record<string, unknown[]> = {};
+            stores.forEach((name) => {
+              const read = tx.objectStore(name).getAll();
+              read.onsuccess = () => {
+                rows[name] = read.result;
+              };
+            });
+            tx.oncomplete = () => {
+              const version = db.version;
+              db.close();
+              resolve({ version, rows });
+            };
+            tx.onerror = () => reject(tx.error);
+          };
+        }),
+    );
+  }
+  const before = await snapshot();
+  await page.goto("/");
+  await expect(
+    page.getByRole("img", { name: "全項目の習得率 33%" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "世界史の習得進捗" }),
+  ).toHaveAttribute("aria-valuenow", "33");
+  const summary = page.getByRole("region", { name: "学習の軌跡" });
+  await expect(summary.locator("dd")).toHaveText(["1", "1", "1"]);
+  await page.reload();
+  await expect(
+    page.getByRole("img", { name: "全項目の習得率 33%" }),
+  ).toBeVisible();
+  await page.goto(`${themeUrl}/roadmap`);
+  await expect(
+    page.locator('[data-learning-state="in-progress"]'),
+  ).toContainText("革命が起きた原因");
+  expect(await snapshot()).toEqual(before);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await activate(
+    page.getByRole("button", { name: "革命が起きた原因", exact: true }),
+  );
+  await expect(
+    page.getByRole("navigation", { name: "項目の学習" }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+test("home subject addition is direct, persistent and works in a shortened viewport", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await activate(page.getByRole("button", { name: "科目を追加", exact: true }));
+  await page.getByLabel("科目名", { exact: true }).fill("数学");
+  await page.setViewportSize({ width: 390, height: 380 });
+  await expect(
+    page.getByRole("button", { name: "保存", exact: true }),
+  ).toBeInViewport();
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.reload();
+  await expect(
+    page.getByRole("heading", { name: "数学", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("progressbar", { name: "数学の習得進捗" }),
+  ).toHaveAttribute("aria-valuenow", "0");
+  await activate(page.getByRole("button", { name: "科目を追加", exact: true }));
+  await page.getByLabel("科目名", { exact: true }).fill(" 数学 ");
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "同じ名前",
+  );
+});
 test("theme and item share both learning screens but retain separate records and completion", async ({
   page,
 }) => {

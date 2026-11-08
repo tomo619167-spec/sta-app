@@ -1,3 +1,4 @@
+import { TraceWordmark } from "@/components/trace/pencil-art";
 import { HardDrive } from "lucide-react";
 export function SettingsScreen() {
   return (
@@ -22,8 +23,8 @@ export function SettingsScreen() {
         </p>
       </section>
       <div className="about-brand">
-        <span>余白</span>
-        <small>Phase 1.5 · 0.1.5</small>
+        <TraceWordmark />
+        <small>Design Ver.1</small>
       </div>
     </>
   );

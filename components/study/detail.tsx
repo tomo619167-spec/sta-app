@@ -10,6 +10,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { PencilUnderline } from "@/components/trace/pencil-art";
 import { features } from "@/lib/features";
 import { examHref, roadmapHref } from "@/lib/learning-context";
 import { useStudy } from "./provider";
@@ -81,9 +82,13 @@ export function DetailScreen({ id }: { id: string }) {
             }}
           />
         </div>
-        <h1>{theme.name}</h1>
+        <h1 className="theme-title">{theme.name}</h1>
+        <PencilUnderline />
         {theme.description && (
-          <p className="detail-description">{theme.description}</p>
+          <div className="theme-objective">
+            <span>学習目標</span>
+            <p className="detail-description">{theme.description}</p>
+          </div>
         )}
       </header>
       <Link
@@ -204,6 +209,20 @@ function RoadmapScreen({
       <header className="roadmap-heading">
         <h1>ロードマップ</h1>
         <p>{theme.name}</p>
+        <div className="state-legend" aria-label="学習状態の凡例">
+          <span>
+            <i className="legend-marker not-started" />
+            未学習
+          </span>
+          <span>
+            <i className="legend-marker in-progress" />
+            学習中
+          </span>
+          <span>
+            <i className="legend-marker mastered" />
+            習得済み
+          </span>
+        </div>
         <Progress
           items={items.filter((item) => item.themeId === themeId)}
           label={theme.name}

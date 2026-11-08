@@ -3,16 +3,19 @@ import { StudyProvider } from "@/components/study/provider";
 import { Shell } from "@/components/study/shell";
 import "./globals.css";
 export const metadata: Metadata = {
-  title: { default: "余白 — 学びを深めるノート", template: "%s | 余白" },
+  title: {
+    default: "TRACE Note — 学びの軌跡を、ノートに残す",
+    template: "%s | TRACE Note",
+  },
   description:
-    "「わかる」を、自分の言葉に。学習テーマと日々の学びを育てる、あなただけのミニマルな学習ノート。",
+    "学びの軌跡を、ノートに残す。科目・テーマ・学習項目と日々の記録を育てる、あなただけの学習ノート。",
 };
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-content",
-  themeColor: "#f8f7f2",
+  themeColor: "#F7F4EC",
 };
 export default function RootLayout({
   children,

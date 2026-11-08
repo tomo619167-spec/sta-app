@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Accordion } from "radix-ui";
 import { Plus, ChevronDown } from "lucide-react";
 import type { StudyItem } from "@/lib/model";
+import { getLearningState, learningStateLabels } from "@/lib/study-summary";
 import { studyRepository } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,7 +23,12 @@ export function RoadmapItems({
   themeId: string;
   initialItemId?: string;
 }) {
-  const { items, refresh } = useStudy();
+  const { items, records, refresh } = useStudy();
+  const recordedItemIds = new Set(
+    records
+      .filter((record) => record.targetType === "item")
+      .map((record) => record.targetId),
+  );
   const themeItems = items.filter((item) => item.themeId === themeId);
   const [expanded, setExpanded] = useState<string[]>(
     initialItemId ? [initialItemId] : [],
@@ -96,22 +102,33 @@ export function RoadmapItems({
           {themeItems.map((item) => {
             const completed =
               pending?.id === item.id ? pending.completed : item.completed;
+            const state = getLearningState(
+              { ...item, completed },
+              recordedItemIds,
+            );
             return (
               <Accordion.Item
                 value={item.id}
                 key={item.id}
                 className="roadmap-item"
+                data-learning-state={state}
               >
                 <div className="roadmap-item-header">
                   <Accordion.Header>
-                    <Accordion.Trigger className="roadmap-item-trigger">
+                    <Accordion.Trigger
+                      className="roadmap-item-trigger"
+                      aria-describedby={`learning-state-${item.id}`}
+                    >
                       <span
-                        className={`mastery-dot ${completed ? "mastered" : ""}`}
+                        className={`mastery-dot ${state}`}
                         aria-hidden="true"
                       />
                       <span>{item.title}</span>
                       <ChevronDown size={17} />
                     </Accordion.Trigger>
+                    <span className="sr-only" id={`learning-state-${item.id}`}>
+                      {learningStateLabels[state]}
+                    </span>
                   </Accordion.Header>
                   <ActionMenu
                     label={`${item.title}のメニュー`}
@@ -138,7 +155,7 @@ export function RoadmapItems({
                         onChange={() => void toggle(item)}
                         disabled={busy}
                       />
-                      <span>{completed ? "習得済み" : "未習得"}</span>
+                      <span>{completed ? "習得済み" : "習得済みにする"}</span>
                       <span className="sr-only">{item.title}</span>
                     </label>
                     <DailyActions themeId={themeId} itemId={item.id} />

@@ -162,7 +162,7 @@ export function ThemeForm({
           </div>
           <div>
             <label htmlFor="theme-description">
-              説明 <span className="optional-label">任意</span>
+              学習目標・説明 <span className="optional-label">任意</span>
             </label>
             <textarea
               id="theme-description"

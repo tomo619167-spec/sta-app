@@ -12,6 +12,10 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
+import {
+  PencilDefinitions,
+  TraceWordmark,
+} from "@/components/trace/pencil-art";
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const { loading, error, refresh } = useStudy();
@@ -22,17 +26,13 @@ export function Shell({ children }: { children: React.ReactNode }) {
   ];
   return (
     <div className="app-shell">
+      <PencilDefinitions />
       <a className="skip-link" href="#main">
         本文へスキップ
       </a>
       <header className="site-header">
-        <Link href="/" className="brand" aria-label="余白 ホーム">
-          <span className="brand-mark">
-            <BookOpen strokeWidth={1.3} />
-          </span>
-          <span>
-            余白<span className="brand-en">YOHAKU</span>
-          </span>
+        <Link href="/" className="brand" aria-label="TRACE Note ホーム">
+          <TraceWordmark />
         </Link>
         <span className="storage-label">
           <HardDrive size={13} strokeWidth={1.5} /> この端末に保存

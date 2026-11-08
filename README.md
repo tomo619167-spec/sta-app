@@ -1,6 +1,6 @@
-# 余白 — YOHAKU / sta-app
+# TRACE Note / sta-app
 
-科目 → 学習テーマ → 学習項目で学びを整理する、スマホ向けの学習ノート。
+学びの軌跡を、ノートに残す。科目 → 学習テーマ → 学習項目で学びを整理する、スマホ向けの学習ノート。
 
 ## 起動
 
@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/learning-target-navigation
+git checkout codex/trace-note-design-v1
 npm install
 npm run dev
 ```
@@ -21,6 +21,14 @@ npm run dev
 npm run build
 npm start
 ```
+
+## デザイン Ver.1
+
+クリームホワイトの紙、明朝体の見出し、細い鉛筆の線を基調としています。ホームの「学習の軌跡」と科目の進捗は実データを集計します。科目はホームの「＋ 科目を追加」から作成できます。
+
+配色・フォント・余白・操作サイズは `app/tokens.css`、既存画面の構造は `app/components.css`、TRACE Noteの外観は `app/trace.css` に分離しています。画像アセットの大量追加や外部フォントの読み込みはありません。
+
+ロードマップは未学習（輪郭）・学習中（ハッチング）・習得済み（オリーブ）の縦型タイムラインです。未習得の項目に項目単位の記録がある場合を「学習中」と表示し、チェック操作で習得済みにします。既存の保存値・完成度・データベース名は変更しません。
 
 ## 学習の導線
 
@@ -90,7 +98,7 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 スマホのプロジェクトはタップ操作、PCはマウスクリックを使います。表示領域の縮小・移動を再現しますが、実機のOSキーボードを使うテストではありません。
 
-今回の仕様・検証は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
+今回のデザイン仕様・検証は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 
 ## 保存範囲
 
