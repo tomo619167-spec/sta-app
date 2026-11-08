@@ -13,12 +13,15 @@ export function HistoryScreen({
   const { records, themes, items } = useStudy();
   const [filter, setFilter] = useState(initialTheme);
   const [targetFilter, setTargetFilter] = useState("");
+  const [activityFilter, setActivityFilter] = useState("");
   const selected = themes.some((theme) => theme.id === filter) ? filter : "";
   const themeRecords = selected
     ? records.filter((record) => record.themeId === selected)
     : records;
   const filtered = themeRecords.filter(
-    (record) => !targetFilter || record.targetType === targetFilter,
+    (record) =>
+      (!targetFilter || record.targetType === targetFilter) &&
+      (!activityFilter || record.activity === activityFilter),
   );
   return (
     <>
@@ -50,6 +53,19 @@ export function HistoryScreen({
           <option value="">すべての対象</option>
           <option value="theme">テーマ全体</option>
           <option value="item">学習項目</option>
+        </select>
+      </div>
+      <div className="history-filter">
+        <label htmlFor="history-activity">記録の種類</label>
+        <select
+          id="history-activity"
+          value={activityFilter}
+          onChange={(event) => setActivityFilter(event.target.value)}
+        >
+          <option value="">すべての記録</option>
+          <option value="output">アウトプット</option>
+          <option value="deepen">理解を深める</option>
+          <option value="memo">学習メモ</option>
         </select>
       </div>
       <div className="section-heading">

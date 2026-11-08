@@ -1,36 +1,21 @@
 "use client";
 import Link from "next/link";
 import { useState } from "react";
-import {
-  Plus,
-  ChevronRight,
-  Globe2,
-  Triangle,
-  BookOpen,
-  ChartNoAxesCombined,
-} from "lucide-react";
+import { Plus, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
 import { ThemeForm } from "./theme-form";
 import { EmptyThemes } from "./shared";
 import { ActionMenu } from "./action-menu";
 import { SubjectManager } from "./subject-manager";
-import { progress } from "@/lib/model";
+import { masteryCounts } from "@/lib/ratings";
+import { SubjectIcon } from "./subject-icon";
+import { MasterySegments } from "./mastery-segments";
 import { subjectProgress } from "@/lib/study-summary";
 import { BookSketch } from "@/components/trace/pencil-art";
 import { StudySummary } from "@/components/trace/study-summary";
-function SubjectIcon({ name }: { name: string }) {
-  const Icon = /数学|算数|数理/.test(name)
-    ? Triangle
-    : /歴史|世界|地理|史/.test(name)
-      ? Globe2
-      : /経済|統計/.test(name)
-        ? ChartNoAxesCombined
-        : BookOpen;
-  return <Icon className="subject-icon" aria-hidden="true" />;
-}
 export function HomeScreen() {
-  const { themes, subjects, items } = useStudy();
+  const { themes, subjects, items, subjectIcons, masteryHistory } = useStudy();
   const [open, setOpen] = useState(false);
   const [manager, setManager] = useState(false);
   const [managerAction, setManagerAction] = useState<"list" | "create">("list");
@@ -102,38 +87,46 @@ export function HomeScreen() {
           </div>
         )}
         {shown.map((subject) => {
-          const value = subjectProgress(subject.id, themes, items);
+          const value = subjectProgress(
+            subject.id,
+            themes,
+            items,
+            masteryHistory,
+          );
           return (
             <section className="subject-group" key={subject.id}>
               <div className="subject-heading">
-                <SubjectIcon name={subject.name} />
+                <SubjectIcon
+                  name={subject.name}
+                  icon={
+                    subjectIcons.find(
+                      (setting) => setting.subjectId === subject.id,
+                    )?.icon
+                  }
+                />
                 <div className="subject-heading-title">
                   <h3>{subject.name}</h3>
                   <span>{value.themeCount} テーマ</span>
                 </div>
                 <div className="subject-progress">
                   <strong>
-                    {value.percent}
-                    <small>%</small>
+                    {value[4]}
+                    <small> / {value.total} 定着</small>
                   </strong>
-                  <div
-                    className="progress-track"
-                    role="progressbar"
-                    aria-label={`${subject.name}の習得進捗`}
-                    aria-valuenow={value.percent}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  >
-                    <span style={{ width: `${value.percent}%` }} />
-                  </div>
+                  <MasterySegments
+                    counts={value}
+                    label={subject.name}
+                    compact
+                  />
                 </div>
               </div>
               <div className="theme-list">
                 {themes
                   .filter((theme) => theme.subjectId === subject.id)
                   .map((theme) => {
-                    const themeValue = progress(
+                    const themeValue = masteryCounts(
                       items.filter((item) => item.themeId === theme.id),
+                      masteryHistory,
                     );
                     return (
                       <Link
@@ -142,7 +135,9 @@ export function HomeScreen() {
                         key={theme.id}
                       >
                         <span>{theme.name}</span>
-                        <small>{themeValue.percent}%</small>
+                        <small>
+                          {themeValue[4]} / {themeValue.total} 定着
+                        </small>
                         <ChevronRight size={16} />
                       </Link>
                     );

@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState, type FormEvent } from "react";
-import type { StudyTarget, LearningActivity } from "@/lib/model";
+import type { FourLevel, StudyTarget, LearningActivity } from "@/lib/model";
 import { studyRepository } from "@/lib/storage";
 import { useStudy } from "./provider";
+import { FourLevelPicker } from "./four-level-picker";
 import { EditorDialog } from "./editor-dialog";
 export function RecordForm({
   themeId,
@@ -21,7 +22,7 @@ export function RecordForm({
 }) {
   const { themes, refresh } = useStudy();
   const [note, setNote] = useState("");
-  const [completion, setCompletion] = useState("");
+  const [outputRating, setOutputRating] = useState<FourLevel>();
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const scope = target ?? { type: "theme" as const, id: themeId };
@@ -41,11 +42,11 @@ export function RecordForm({
       await studyRepository.addRecord(themeId, note, {
         target: scope,
         activity,
-        completion: completion === "" ? undefined : Number(completion),
+        outputRating: activity === "output" ? outputRating : undefined,
       });
       await refresh();
       setNote("");
-      setCompletion("");
+      setOutputRating(undefined);
       onOpenChange(false);
     } catch (error) {
       setError(
@@ -85,25 +86,14 @@ export function RecordForm({
           disabled={saving}
         />
       </div>
-      <div>
-        <label htmlFor="study-completion">
-          完成度 <span className="optional-label">任意</span>
-        </label>
-        <div className="completion-input">
-          <input
-            id="study-completion"
-            type="number"
-            inputMode="numeric"
-            min={0}
-            max={100}
-            step={1}
-            value={completion}
-            onChange={(e) => setCompletion(e.target.value)}
-            disabled={saving}
-          />
-          <span>%</span>
-        </div>
-      </div>
+      {activity === "output" && (
+        <FourLevelPicker
+          kind="output"
+          value={outputRating}
+          onChange={setOutputRating}
+          disabled={saving}
+        />
+      )}
     </EditorDialog>
   );
 }

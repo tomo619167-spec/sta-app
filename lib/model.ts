@@ -1,3 +1,12 @@
+export type FourLevel = 1 | 2 | 3 | 4;
+export interface MasteryChange {
+  id: number;
+  themeId: string;
+  targetType: TargetType;
+  targetId: string;
+  level: FourLevel;
+  changedAt: string;
+}
 export interface RoadmapItem {
   id: string;
   title: string;
@@ -47,11 +56,15 @@ export interface StudyRecord extends LegacyStudyRecord {
   targetType: TargetType;
   targetId: string;
   activity: LearningActivity;
+  /** Legacy percentage, retained verbatim. Never converted to a four-level rating. */
   completion?: number;
+  outputRating?: FourLevel;
 }
 export interface RecordOptions {
   target?: StudyTarget;
+  /** Compatibility for legacy callers; current UI never collects percentages. */
   completion?: number;
+  outputRating?: FourLevel;
   activity?: LearningActivity;
 }
 export function validateGoal(goal: string) {

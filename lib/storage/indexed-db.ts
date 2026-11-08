@@ -1,6 +1,8 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import {
   normalizeSubject,
+  type MasteryChange,
+  type FourLevel,
   validateGoal,
   validateCompletion,
   type StudyTarget,
@@ -16,8 +18,21 @@ import {
   type Theme,
   type ThemeInput,
 } from "../model";
+import {
+  inferSubjectIcon,
+  validateSubjectIcon,
+  type SubjectIconKey,
+  type SubjectIconSetting,
+} from "../subject-icons";
+import { validateFourLevel } from "../ratings";
 import type { StudyRepository } from "./repository";
 interface StudyDB extends DBSchema {
+  "subject-icons": { key: string; value: SubjectIconSetting };
+  "mastery-history": {
+    key: number;
+    value: Omit<MasteryChange, "id">;
+    indexes: { "by-theme": string; "by-target": ["theme" | "item", string] };
+  };
   subjects: { key: string; value: Subject; indexes: { "by-name": string } };
   themes: { key: string; value: Theme; indexes: { "by-subject": string } };
   items: { key: string; value: StudyItem; indexes: { "by-theme": string } };
@@ -46,7 +61,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
   constructor(private readonly name = "yohaku-study") {}
   private db() {
     if (!this.connection)
-      this.connection = openDB<StudyDB>(this.name, 3, {
+      this.connection = openDB<StudyDB>(this.name, 4, {
         upgrade(db, oldVersion, _newVersion, tx) {
           // The open request reports upgrade failures; also consume tx.done.
           void tx.done.catch(() => {});
@@ -117,13 +132,14 @@ export class IndexedDBStudyRepository implements StudyRepository {
             });
           }
           if (oldVersion < 3) {
+            const hierarchyReady = migrateHierarchy;
             const records = tx.objectStore("records");
             records.createIndex("by-target", ["targetType", "targetId"]);
             db.createObjectStore("legacy-records-v2", {
               keyPath: "id",
             }).createIndex("by-theme", "themeId");
-            void (async () => {
-              await migrateHierarchy;
+            migrateHierarchy = (async () => {
+              await hierarchyReady;
               let cursor = await records.openCursor();
               while (cursor) {
                 const original = cursor.value;
@@ -143,6 +159,38 @@ export class IndexedDBStudyRepository implements StudyRepository {
                   goal: item.value.goal ?? "",
                 });
                 item = await item.continue();
+              }
+            })().catch(() => {
+              try {
+                tx.abort();
+              } catch {
+                /* already aborted */
+              }
+            });
+          }
+          if (oldVersion < 4) {
+            db.createObjectStore("subject-icons", { keyPath: "subjectId" });
+            const history = db.createObjectStore("mastery-history", {
+              autoIncrement: true,
+            });
+            history.createIndex("by-theme", "themeId");
+            history.createIndex("by-target", ["targetType", "targetId"]);
+            // Additive upgrade: existing subjects/items/themes/records are never rewritten.
+            // Wait for the older hierarchy migrations when upgrading directly from v1/v2.
+            void (async () => {
+              await migrateHierarchy;
+              let subject = await tx.objectStore("subjects").openCursor();
+              while (subject) {
+                const value = subject.value;
+                if (!(await tx.objectStore("subject-icons").get(value.id))) {
+                  await tx.objectStore("subject-icons").add({
+                    subjectId: value.id,
+                    icon: inferSubjectIcon(value.name),
+                    source: "auto",
+                    updatedAt: value.updatedAt,
+                  });
+                }
+                subject = await subject.continue();
               }
             })().catch(() => {
               try {
@@ -186,9 +234,21 @@ export class IndexedDBStudyRepository implements StudyRepository {
       createdAt: now,
       updatedAt: now,
     };
+    const tx = (await this.db()).transaction(
+      ["subjects", "subject-icons"],
+      "readwrite",
+    );
     try {
-      await (await this.db()).add("subjects", subject);
+      await tx.objectStore("subjects").add(subject);
+      await tx.objectStore("subject-icons").add({
+        subjectId: subject.id,
+        icon: inferSubjectIcon(subject.name),
+        source: "auto",
+        updatedAt: now,
+      });
+      await tx.done;
     } catch (error) {
+      await abortTransaction(tx);
       if ((error as DOMException).name === "ConstraintError")
         throw new Error("同じ名前の科目があります。");
       throw error;
@@ -197,16 +257,28 @@ export class IndexedDBStudyRepository implements StudyRepository {
   }
   async renameSubject(id: string, name: string) {
     const value = validateSubject(name);
-    const tx = (await this.db()).transaction("subjects", "readwrite");
+    const tx = (await this.db()).transaction(
+      ["subjects", "subject-icons"],
+      "readwrite",
+    );
     try {
-      const subject = await tx.store.get(id);
+      const subject = await tx.objectStore("subjects").get(id);
       if (!subject) throw new Error("科目が見つかりません。");
       const updated = {
         ...subject,
         ...value,
         updatedAt: new Date().toISOString(),
       };
-      await tx.store.put(updated);
+      await tx.objectStore("subjects").put(updated);
+      const setting = await tx.objectStore("subject-icons").get(id);
+      if (!setting || setting.source === "auto") {
+        await tx.objectStore("subject-icons").put({
+          subjectId: id,
+          icon: inferSubjectIcon(value.name),
+          source: "auto",
+          updatedAt: updated.updatedAt,
+        });
+      }
       await tx.done;
       return updated;
     } catch (error) {
@@ -277,11 +349,23 @@ export class IndexedDBStudyRepository implements StudyRepository {
   }
   async deleteTheme(id: string) {
     const tx = (await this.db()).transaction(
-      ["themes", "items", "records", "legacy-themes-v1", "legacy-records-v2"],
+      [
+        "themes",
+        "items",
+        "records",
+        "legacy-themes-v1",
+        "legacy-records-v2",
+        "mastery-history",
+      ],
       "readwrite",
     );
     try {
-      for (const name of ["items", "records", "legacy-records-v2"] as const) {
+      for (const name of [
+        "items",
+        "records",
+        "legacy-records-v2",
+        "mastery-history",
+      ] as const) {
         const keys = await tx
           .objectStore(name)
           .index("by-theme")
@@ -363,13 +447,22 @@ export class IndexedDBStudyRepository implements StudyRepository {
     }
   }
   async deleteItem(id: string) {
-    const tx = (await this.db()).transaction(["items", "records"], "readwrite");
+    const tx = (await this.db()).transaction(
+      ["items", "records", "mastery-history"],
+      "readwrite",
+    );
     try {
       const keys = await tx
         .objectStore("records")
         .index("by-target")
         .getAllKeys(["item", id]);
       for (const key of keys) await tx.objectStore("records").delete(key);
+      const historyKeys = await tx
+        .objectStore("mastery-history")
+        .index("by-target")
+        .getAllKeys(["item", id]);
+      for (const key of historyKeys)
+        await tx.objectStore("mastery-history").delete(key);
       await tx.objectStore("items").delete(id);
       await tx.done;
     } catch (error) {
@@ -395,6 +488,12 @@ export class IndexedDBStudyRepository implements StudyRepository {
     const target = options.target ?? { type: "theme", id: themeId };
     const completion = validateCompletion(options.completion);
     const activity = options.activity ?? "memo";
+    const outputRating =
+      options.outputRating === undefined
+        ? undefined
+        : validateFourLevel(options.outputRating);
+    if (outputRating !== undefined && activity !== "output")
+      throw new Error("完成度はアウトプットで評価してください。");
     if (
       !["theme", "item"].includes(target.type) ||
       !["memo", "output", "deepen"].includes(activity)
@@ -427,6 +526,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
         targetId: target.id,
         activity,
         ...(completion === undefined ? {} : { completion }),
+        ...(outputRating === undefined ? {} : { outputRating }),
         note: text,
         studiedAt: now,
       };
@@ -436,6 +536,84 @@ export class IndexedDBStudyRepository implements StudyRepository {
         .put({ ...theme, lastStudiedAt: now, updatedAt: now });
       await tx.done;
       return record;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async listSubjectIcons() {
+    return (await this.db()).getAll("subject-icons");
+  }
+  async setSubjectIcon(subjectId: string, icon: SubjectIconKey | "auto") {
+    if (icon !== "auto") validateSubjectIcon(icon);
+    const tx = (await this.db()).transaction(
+      ["subjects", "subject-icons"],
+      "readwrite",
+    );
+    try {
+      const subject = await tx.objectStore("subjects").get(subjectId);
+      if (!subject) throw new Error("科目が見つかりません。");
+      const setting: SubjectIconSetting = {
+        subjectId,
+        icon: icon === "auto" ? inferSubjectIcon(subject.name) : icon,
+        source: icon === "auto" ? "auto" : "manual",
+        updatedAt: new Date().toISOString(),
+      };
+      await tx.objectStore("subject-icons").put(setting);
+      await tx.done;
+      return setting;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async listMasteryHistory(themeId?: string): Promise<MasteryChange[]> {
+    const tx = (await this.db()).transaction("mastery-history");
+    const [entries, keys] = themeId
+      ? await Promise.all([
+          tx.store.index("by-theme").getAll(themeId),
+          tx.store.index("by-theme").getAllKeys(themeId),
+        ])
+      : await Promise.all([tx.store.getAll(), tx.store.getAllKeys()]);
+    await tx.done;
+    return entries
+      .map((entry, index) => ({ ...entry, id: keys[index] }))
+      .sort((a, b) => b.id - a.id);
+  }
+  async setMastery(
+    themeId: string,
+    target: StudyTarget,
+    level: FourLevel,
+  ): Promise<MasteryChange> {
+    validateFourLevel(level);
+    if (!["theme", "item"].includes(target.type))
+      throw new Error("学習対象を確認してください。");
+    const tx = (await this.db()).transaction(
+      ["themes", "items", "mastery-history"],
+      "readwrite",
+    );
+    try {
+      if (!(await tx.objectStore("themes").get(themeId)))
+        throw new Error("テーマが見つかりません。");
+      if (target.type === "theme" && target.id !== themeId)
+        throw new Error("学習対象がテーマと一致しません。");
+      if (target.type === "item") {
+        const item = await tx.objectStore("items").get(target.id);
+        if (!item || item.themeId !== themeId)
+          throw new Error(
+            "学習項目が見つからないか、別のテーマに属しています。",
+          );
+      }
+      const entry = {
+        themeId,
+        targetType: target.type,
+        targetId: target.id,
+        level,
+        changedAt: new Date().toISOString(),
+      };
+      const id = await tx.objectStore("mastery-history").add(entry);
+      await tx.done;
+      return { ...entry, id };
     } catch (error) {
       await abortTransaction(tx);
       throw error;
