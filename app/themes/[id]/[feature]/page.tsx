@@ -4,15 +4,16 @@ export default async function Page({
   searchParams,
 }: {
   params: Promise<{ id: string; feature: string }>;
-  searchParams: Promise<{ item?: string | string[] }>;
+  searchParams: Promise<{ item?: string | string[]; from?: string | string[] }>;
 }) {
   const { id, feature } = await params;
-  const { item } = await searchParams;
+  const { item, from } = await searchParams;
   return (
     <FeatureScreen
       id={id}
       slug={feature}
       itemId={Array.isArray(item) ? "" : item}
+      fromTheme={from === "theme"}
     />
   );
 }

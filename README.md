@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/subject-icons-four-levels
+git checkout codex/theme-learning-entry
 npm install
 npm run dev
 ```
@@ -33,11 +33,13 @@ npm start
 ## 学習の導線
 
 - ホーム：科目 → 学習テーマ。既存のテーマ管理と科目選択を維持
-- テーマ詳細：科目・テーマ名 → タップできるロードマップ進捗 → 横並びの日常学習 → 独立した過去問セクション
+- テーマ詳細：科目・テーマ名・習得段階 → 学習項目4件（展開・すべて表示）→ テーマ全体を学ぶ → 過去問・演習
+- 項目を展開して学習ボタンを押す2タップで開始。戻るとテーマ詳細の同じ項目を展開
+- 学習目標は必要な時に開く。コンパクトな「説明できる以上」の件数からロードマップ詳細管理へ移動
 - ロードマップ：項目をタップして展開。到達目標・4段階の習得度・アウトプット・理解を深めるを表示
 - テーマ全体と学習項目の両方から、同じ学習画面へ移動。現在の対象を明示
 - 科目アイコン：科目名から自動選択。「… → 科目を管理 → 科目の… → アイコンを変更」で手動変更・自動へ戻す
-- 習得度：テーマ全体と項目それぞれで選択し、変更履歴を保存
+- 習得度：テーマ名付近のバッジで確認。「テーマの… → 習得度を変更」で更新。項目・学習画面からも選択でき、変更履歴を保存
 - アウトプット：今回の説明を任意の4段階で評価。各回の日時・内容・評価を履歴表示し、記録画面で対象・種類を絞り込み可能
 - スマホ入力：既存の全画面フォーム・VisualViewport対応を再利用
 
@@ -106,7 +108,7 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 スマホのプロジェクトはタップ操作、PCはマウスクリックを使います。表示領域の縮小・移動を再現しますが、実機のOSキーボードを使うテストではありません。
 
-今回の評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
+今回のテーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 
 ## 保存範囲
 

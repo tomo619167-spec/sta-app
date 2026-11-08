@@ -7,6 +7,7 @@ import { MasteryControl } from "./mastery-control";
 import {
   resolveTarget,
   roadmapHref,
+  themeHref,
   type DailyFeature,
 } from "@/lib/learning-context";
 import { useStudy } from "./provider";
@@ -16,18 +17,20 @@ export function LearningScreen({
   themeId,
   feature,
   itemId,
+  fromTheme = false,
 }: {
   themeId: string;
   feature: DailyFeature;
   itemId?: string;
+  fromTheme?: boolean;
 }) {
   const { themes, items, records } = useStudy();
   const [open, setOpen] = useState(false);
   const theme = themes.find((theme) => theme.id === themeId);
   const resolved = theme ? resolveTarget(theme, items, itemId) : undefined;
   const back =
-    itemId === undefined
-      ? `/themes/${encodeURIComponent(themeId)}`
+    itemId === undefined || fromTheme
+      ? themeHref(themeId, itemId)
       : roadmapHref(themeId, itemId);
   if (!theme || !resolved)
     return (
@@ -55,7 +58,9 @@ export function LearningScreen({
   return (
     <>
       <BackLink href={back}>
-        {itemId === undefined ? "テーマに戻る" : "ロードマップに戻る"}
+        {itemId === undefined || fromTheme
+          ? "テーマに戻る"
+          : "ロードマップに戻る"}
       </BackLink>
       <header className="learning-heading">
         <Icon size={25} strokeWidth={1.4} />

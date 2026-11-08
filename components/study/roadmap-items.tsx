@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Accordion } from "radix-ui";
 import { Plus, ChevronDown } from "lucide-react";
 import type { StudyItem } from "@/lib/model";
-import { latestMastery, masteryLabel } from "@/lib/ratings";
+import { latestMastery } from "@/lib/ratings";
+import { MasteryBadge } from "./mastery-badge";
 import { MasteryControl } from "./mastery-control";
 import { studyRepository } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
@@ -20,12 +21,23 @@ import { DailyActions } from "./daily-actions";
 export function RoadmapItems({
   themeId,
   initialItemId,
+  preview = false,
 }: {
   themeId: string;
   initialItemId?: string;
+  preview?: boolean;
 }) {
   const { items, masteryHistory, refresh } = useStudy();
   const themeItems = items.filter((item) => item.themeId === themeId);
+  const listId = useId();
+  const previewLimit = 4;
+  const [showAll, setShowAll] = useState(
+    () =>
+      !!initialItemId &&
+      themeItems.findIndex((item) => item.id === initialItemId) >= previewLimit,
+  );
+  const visibleItems =
+    preview && !showAll ? themeItems.slice(0, previewLimit) : themeItems;
   const [expanded, setExpanded] = useState<string[]>(
     initialItemId ? [initialItemId] : [],
   );
@@ -49,7 +61,10 @@ export function RoadmapItems({
     }
   }
   return (
-    <section className="items-section">
+    <section
+      className={`items-section${preview ? " items-preview" : ""}`}
+      aria-label="学習項目"
+    >
       <div className="section-heading">
         <h2>
           学習項目 <span className="count">{themeItems.length}</span>
@@ -72,8 +87,9 @@ export function RoadmapItems({
           value={expanded}
           onValueChange={setExpanded}
           className="roadmap-items"
+          id={listId}
         >
-          {themeItems.map((item) => {
+          {visibleItems.map((item) => {
             const level = latestMastery(masteryHistory, {
               type: "item",
               id: item.id,
@@ -90,6 +106,7 @@ export function RoadmapItems({
                   <Accordion.Header>
                     <Accordion.Trigger
                       className="roadmap-item-trigger"
+                      aria-label={item.title}
                       aria-describedby={`learning-state-${item.id}`}
                     >
                       <span
@@ -97,12 +114,15 @@ export function RoadmapItems({
                         data-level={state}
                         aria-hidden="true"
                       />
-                      <span>{item.title}</span>
+                      <span className="item-title-state">
+                        <span>{item.title}</span>
+                        <MasteryBadge
+                          level={level}
+                          id={`learning-state-${item.id}`}
+                        />
+                      </span>
                       <ChevronDown size={17} />
                     </Accordion.Trigger>
-                    <span className="sr-only" id={`learning-state-${item.id}`}>
-                      {masteryLabel(level)}
-                    </span>
                   </Accordion.Header>
                   <ActionMenu
                     label={`${item.title}のメニュー`}
@@ -129,8 +149,13 @@ export function RoadmapItems({
                       themeId={themeId}
                       target={{ type: "item", id: item.id }}
                       name={item.title}
+                      compact={preview}
                     />
-                    <DailyActions themeId={themeId} itemId={item.id} />
+                    <DailyActions
+                      themeId={themeId}
+                      itemId={item.id}
+                      fromTheme={preview}
+                    />
                   </div>
                 </Accordion.Content>
               </Accordion.Item>
@@ -139,6 +164,19 @@ export function RoadmapItems({
         </Accordion.Root>
       ) : (
         <p className="quiet-empty">項目を追加して、学びを小さく。</p>
+      )}
+      {preview && themeItems.length > previewLimit && (
+        <button
+          className="show-all-items"
+          type="button"
+          aria-expanded={showAll}
+          aria-controls={listId}
+          onClick={() => setShowAll((value) => !value)}
+        >
+          {showAll
+            ? "表示を少なくする"
+            : `すべて表示（${themeItems.length}項目）`}
+        </button>
       )}
       {error && !deleting && (
         <p role="alert" className="form-error">
