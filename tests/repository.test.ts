@@ -1,4 +1,11 @@
 import "fake-indexeddb/auto";
+import {
+  buildRoadmapPrompt,
+  parseRoadmapJSON,
+  roadmapExample,
+  findRoadmapDuplicates,
+} from "../lib/roadmap-json";
+import { nextStudyItem } from "../lib/roadmap";
 import type { FourLevel } from "../lib/model";
 import { inferSubjectIcon, type SubjectIconKey } from "../lib/subject-icons";
 import { latestMastery, latestOutput, masteryCounts } from "../lib/ratings";
@@ -470,25 +477,21 @@ async function seedV3(name: string) {
   await tx
     .objectStore("items")
     .put({ ...old.item, goal: "消してはいけない目標" });
-  await tx
-    .objectStore("records")
-    .put({
-      ...old.record,
-      activity: "output",
-      targetType: "theme",
-      targetId: old.theme.id,
-      completion: 0,
-    });
-  await tx
-    .objectStore("records")
-    .add({
-      ...old.record,
-      id: "percent-100",
-      activity: "output",
-      targetType: "item",
-      targetId: old.item.id,
-      completion: 100,
-    });
+  await tx.objectStore("records").put({
+    ...old.record,
+    activity: "output",
+    targetType: "theme",
+    targetId: old.theme.id,
+    completion: 0,
+  });
+  await tx.objectStore("records").add({
+    ...old.record,
+    id: "percent-100",
+    activity: "output",
+    targetType: "item",
+    targetId: old.item.id,
+    completion: 100,
+  });
   await tx.objectStore("legacy-records-v2").add(old.record);
   await tx.objectStore("legacy-themes-v1").add(legacy);
   await tx.done;
@@ -750,4 +753,353 @@ test("mastery history deletion is scoped to its parent and failed writes retain 
   const remaining = await repo.listMasteryHistory();
   assert.equal(remaining.length, 1);
   assert.equal(remaining[0].themeId, other.id);
+});
+
+function roadmapSource(
+  items = [
+    { title: "革命の背景", goal: "身分制度の特徴を自分の言葉で説明できる" },
+  ],
+  subject = "世界史",
+  theme = "フランス革命",
+) {
+  return JSON.stringify({ version: 1, subject, theme, items });
+}
+test("the fixed prompt and import validator share the same versioned JSON format", () => {
+  const example = roadmapExample("世界史", "フランス革命");
+  const prompt = buildRoadmapPrompt({
+    subject: "世界史",
+    theme: "フランス革命",
+    goal: "革命の背景と変化を説明できる",
+    level: "university",
+    notes: "初学者向け",
+  });
+  assert.ok(prompt.includes("大学"));
+  assert.ok(prompt.includes("確認可能な行動"));
+  assert.ok(prompt.includes("指定外の項目は出力しない"));
+  assert.ok(prompt.endsWith(JSON.stringify(example, null, 2)));
+  assert.deepEqual(parseRoadmapJSON(prompt.split("\n\n").at(-1)!), example);
+  assert.throws(
+    () =>
+      buildRoadmapPrompt({
+        subject: "世界史",
+        theme: "革命",
+        goal: "",
+        level: "other",
+        notes: "",
+      }),
+    /到達目標/,
+  );
+});
+test("JSON validation reports syntax, version, required fields, sizes and unsupported assessment fields precisely", () => {
+  const invalid: [string, RegExp][] = [
+    ["{", /構文/],
+    ["```json\n{}\n```", /コードブロック/],
+    ["null", /オブジェクト/],
+    ["[]", /オブジェクト/],
+    [JSON.stringify({ version: 2 }), /version/],
+    [JSON.stringify({ version: "1" }), /version/],
+    [JSON.stringify({ version: 1, theme: "革命", items: [] }), /subject/],
+    [roadmapSource([], "世界史", "フランス革命"), /items/],
+    [roadmapSource([{ title: "", goal: "説明" }]), /items\[0\].title/],
+    [roadmapSource([{ title: "原因", goal: "" }]), /items\[0\].goal/],
+    [roadmapSource([{ title: "a".repeat(121), goal: "説明" }]), /120文字/],
+    [roadmapSource([{ title: "原因", goal: "a".repeat(1001) }]), /1000文字/],
+    [
+      roadmapSource(
+        Array.from({ length: 51 }, (_, index) => ({
+          title: `項目${index}`,
+          goal: "説明",
+        })),
+      ),
+      /1〜50/,
+    ],
+    [
+      JSON.stringify({
+        version: 1,
+        subject: "世界史",
+        theme: "革命",
+        items: [{ title: "原因", goal: "説明", completed: true }],
+      }),
+      /completed/,
+    ],
+    [
+      JSON.stringify({
+        version: 1,
+        subject: "世界史",
+        theme: "革命",
+        items: [null],
+      }),
+      /items\[0\]/,
+    ],
+    [
+      JSON.stringify({
+        version: 1,
+        subject: "世界史",
+        theme: "革命",
+        items: [{ title: 1, goal: "説明" }],
+      }),
+      /title/,
+    ],
+    [" ".repeat(100001), /100,000/],
+  ];
+  for (const [source, message] of invalid)
+    assert.throws(() => parseRoadmapJSON(source), message);
+  const valid = parseRoadmapJSON(
+    roadmapSource([{ title: " 原因 ", goal: " 背景を説明できる " }]),
+  );
+  assert.equal(valid.items[0].title, "原因");
+  assert.equal(valid.items[0].goal, "背景を説明できる");
+});
+test("duplicate checks cover normalized existing titles and repeated titles inside the same import", () => {
+  const document = parseRoadmapJSON(
+    roadmapSource([
+      { title: " Ａ  B ", goal: "説明1" },
+      { title: "a b", goal: "説明2" },
+      { title: "別項目", goal: "説明3" },
+    ]),
+  );
+  assert.deepEqual(findRoadmapDuplicates(document.items, [{ title: "a b" }]), [
+    { index: 0, existing: true, within: false },
+    { index: 1, existing: true, within: true },
+  ]);
+});
+test("theme goal editing preserves current names, hierarchy, legacy roadmap, records and independent mastery", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const item = await repo.createItem(theme.id, "原因", "元の到達目標");
+  const record = await repo.addRecord(theme.id, "既存の記録", {
+    completion: 60,
+  });
+  await repo.setMastery(theme.id, { type: "theme", id: theme.id }, 2);
+  await repo.updateTheme(theme.id, { ...input, name: "近代社会" });
+  const updated = await repo.updateThemeGoal(
+    theme.id,
+    "社会と政治の変化を比較して説明できる",
+  );
+  assert.equal(updated.name, "近代社会");
+  assert.equal(updated.subjectId, input.subjectId);
+  assert.deepEqual(updated.roadmap, theme.roadmap);
+  assert.equal(updated.description, "社会と政治の変化を比較して説明できる");
+  assert.deepEqual(await repo.listItems(), [item]);
+  assert.deepEqual(await repo.listRecords(), [record]);
+  assert.equal(
+    latestMastery(await repo.listMasteryHistory(), {
+      type: "theme",
+      id: theme.id,
+    }),
+    2,
+  );
+  await assert.rejects(repo.updateThemeGoal(theme.id, "x".repeat(1001)));
+  assert.deepEqual(await repo.getTheme(theme.id), updated);
+  await repo.close();
+  assert.equal(
+    (await repo.getTheme(theme.id))!.description,
+    updated.description,
+  );
+});
+test("moving items persists their order without changing goals, legacy mastery, records or another theme", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const other = await repo.createTheme({ ...input, name: "別テーマ" });
+  const a = await repo.createItem(theme.id, "前提", "目標A");
+  const b = await repo.createItem(theme.id, "原因", "目標B");
+  const c = await repo.createItem(theme.id, "影響", "目標C");
+  const outside = await repo.createItem(other.id, "他の項目");
+  await repo.updateItem(b.id, {
+    title: b.title,
+    goal: b.goal,
+    completed: true,
+  });
+  const record = await repo.addRecord(theme.id, "原因を説明", {
+    target: { type: "item", id: b.id },
+    activity: "output",
+    outputRating: 3,
+  });
+  const history = await repo.setMastery(
+    theme.id,
+    { type: "item", id: b.id },
+    2,
+  );
+  await repo.moveItem(theme.id, c.id, "up");
+  assert.deepEqual(
+    (await repo.listItems(theme.id)).map((item) => item.id),
+    [a.id, c.id, b.id],
+  );
+  await repo.moveItem(theme.id, a.id, "down");
+  const reordered = await repo.listItems(theme.id);
+  assert.deepEqual(
+    reordered.map((item) => item.position),
+    [0, 1, 2],
+  );
+  assert.deepEqual(
+    reordered.map((item) => item.id),
+    [c.id, a.id, b.id],
+  );
+  assert.equal(reordered[2].goal, "目標B");
+  assert.equal(reordered[2].completed, true);
+  assert.deepEqual(await repo.listItems(other.id), [outside]);
+  assert.deepEqual(await repo.listRecords(), [record]);
+  assert.deepEqual(await repo.listMasteryHistory(), [history]);
+  await repo.moveItem(theme.id, c.id, "up");
+  assert.deepEqual(await repo.listItems(theme.id), reordered);
+  await assert.rejects(repo.moveItem(theme.id, outside.id, "up"));
+  await assert.rejects(repo.moveItem(theme.id, "missing", "down"));
+  await repo.close();
+  assert.deepEqual(await repo.listItems(theme.id), reordered);
+});
+test("a failed reorder rolls back every position and timestamp", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const a = await repo.createItem(theme.id, "前提");
+  await repo.createItem(theme.id, "原因");
+  const before = await repo.listItems();
+  const put = IDBObjectStore.prototype.put;
+  let writes = 0;
+  IDBObjectStore.prototype.put = function (
+    ...args: Parameters<IDBObjectStore["put"]>
+  ) {
+    if (this.name === "items" && ++writes === 2)
+      throw new DOMException("Quota", "QuotaExceededError");
+    return put.apply(this, args);
+  };
+  try {
+    await assert.rejects(repo.moveItem(theme.id, a.id, "down"));
+  } finally {
+    IDBObjectStore.prototype.put = put;
+  }
+  assert.deepEqual(await repo.listItems(), before);
+});
+test("next study follows display order, prioritizes stages 1 or 2, then unassessed, and ignores theme mastery", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const unrated = await repo.createItem(theme.id, "未評価");
+  const ready = await repo.createItem(theme.id, "説明できる");
+  const studying = await repo.createItem(theme.id, "学習中");
+  const newItem = await repo.createItem(theme.id, "未着手");
+  await repo.setMastery(theme.id, { type: "item", id: ready.id }, 3);
+  await repo.setMastery(theme.id, { type: "item", id: studying.id }, 2);
+  await repo.setMastery(theme.id, { type: "item", id: newItem.id }, 1);
+  const next = async () =>
+    nextStudyItem(
+      await repo.listItems(theme.id),
+      await repo.listMasteryHistory(),
+    )?.id;
+  assert.equal(await next(), studying.id);
+  await repo.moveItem(theme.id, newItem.id, "up");
+  assert.equal(await next(), newItem.id);
+  await repo.setMastery(theme.id, { type: "item", id: newItem.id }, 4);
+  assert.equal(await next(), studying.id);
+  await repo.setMastery(theme.id, { type: "item", id: studying.id }, 3);
+  assert.equal(await next(), unrated.id);
+  await repo.setMastery(theme.id, { type: "item", id: unrated.id }, 3);
+  await repo.setMastery(theme.id, { type: "theme", id: theme.id }, 1);
+  assert.equal(await next(), undefined);
+});
+test("JSON imports append new IDs in JSON order while all existing rows and assessment histories remain unchanged", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const original = await repo.createItem(theme.id, "既存", "既存の目標");
+  const record = await repo.addRecord(theme.id, "元の記録", {
+    completion: 100,
+  });
+  const beforeTheme = await repo.getTheme(theme.id);
+  const mastery = await repo.setMastery(
+    theme.id,
+    { type: "item", id: original.id },
+    4,
+  );
+  const added = await repo.importRoadmap(
+    theme.id,
+    roadmapSource([
+      { title: "原因", goal: "背景を説明できる" },
+      { title: "影響", goal: "変化を比較できる" },
+    ]),
+  );
+  assert.equal(new Set(added.map((item) => item.id)).size, 2);
+  assert.deepEqual(
+    added.map((item) => item.position),
+    [1, 2],
+  );
+  assert.deepEqual(
+    (await repo.listItems(theme.id)).map((item) => item.title),
+    ["既存", "原因", "影響"],
+  );
+  assert.deepEqual((await repo.listItems(theme.id))[0], original);
+  assert.ok(
+    added.every((item) => !item.completed && item.themeId === theme.id),
+  );
+  assert.deepEqual(await repo.listRecords(), [record]);
+  assert.deepEqual(await repo.listMasteryHistory(), [mastery]);
+  assert.deepEqual(await repo.getTheme(theme.id), beforeTheme);
+  await repo.close();
+  assert.equal((await repo.listItems(theme.id)).length, 3);
+});
+test("duplicate imports need explicit consent and do not overwrite either title or goal", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const original = await repo.createItem(theme.id, "Ａ  B", "元の目標");
+  const source = roadmapSource([
+    { title: "a b", goal: "新しい目標" },
+    { title: "a b", goal: "別の新しい目標" },
+  ]);
+  await assert.rejects(repo.importRoadmap(theme.id, source), /同じ名前/);
+  assert.deepEqual(await repo.listItems(), [original]);
+  await repo.importRoadmap(theme.id, source, true);
+  assert.equal((await repo.listItems()).length, 3);
+  assert.deepEqual((await repo.listItems())[0], original);
+});
+test("a failed import rolls back every inserted item and leaves the existing database usable", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const original = await repo.createItem(theme.id, "既存", "残す目標");
+  const add = IDBObjectStore.prototype.add;
+  let writes = 0;
+  IDBObjectStore.prototype.add = function (
+    ...args: Parameters<IDBObjectStore["add"]>
+  ) {
+    if (this.name === "items" && ++writes === 2)
+      throw new DOMException("Quota", "QuotaExceededError");
+    return add.apply(this, args);
+  };
+  const source = roadmapSource([
+    { title: "原因", goal: "原因を説明できる" },
+    { title: "影響", goal: "影響を説明できる" },
+  ]);
+  try {
+    await assert.rejects(repo.importRoadmap(theme.id, source));
+  } finally {
+    IDBObjectStore.prototype.add = add;
+  }
+  await repo.close();
+  assert.deepEqual(await repo.listItems(), [original]);
+  assert.deepEqual(await repo.listRecords(), []);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+  await repo.importRoadmap(theme.id, source);
+  assert.equal((await repo.listItems()).length, 3);
+});
+test("imports recheck context and duplicates at commit time including concurrent imports", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const source = roadmapSource();
+  parseRoadmapJSON(source);
+  await repo.updateTheme(theme.id, { ...input, name: "変更後" });
+  await assert.rejects(repo.importRoadmap(theme.id, source), /theme/);
+  await repo.updateTheme(theme.id, input);
+  await repo.renameSubject(input.subjectId, "歴史");
+  await assert.rejects(repo.importRoadmap(theme.id, source), /subject/);
+  await repo.renameSubject(input.subjectId, "世界史");
+  const result = await Promise.allSettled([
+    repo.importRoadmap(theme.id, source),
+    repo.importRoadmap(theme.id, source),
+  ]);
+  assert.equal(
+    result.filter((entry) => entry.status === "fulfilled").length,
+    1,
+  );
+  assert.equal((await repo.listItems()).length, 1);
+  const before = await repo.listItems();
+  await assert.rejects(repo.importRoadmap(theme.id, "{}"));
+  assert.deepEqual(await repo.listItems(), before);
+  await repo.deleteTheme(theme.id);
+  await assert.rejects(repo.importRoadmap(theme.id, source), /テーマ/);
 });

@@ -1,7 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import { Accordion } from "radix-ui";
-import { Plus, ChevronDown } from "lucide-react";
+import { Plus, ChevronDown, ArrowUpDown } from "lucide-react";
 import type { StudyItem } from "@/lib/model";
 import { latestMastery } from "@/lib/ratings";
 import { MasteryBadge } from "./mastery-badge";
@@ -15,6 +15,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useStudy } from "./provider";
+import { ReorderItems } from "./reorder-items";
 import { ItemForm } from "./item-form";
 import { ActionMenu } from "./action-menu";
 import { DailyActions } from "./daily-actions";
@@ -41,6 +42,7 @@ export function RoadmapItems({
   const [expanded, setExpanded] = useState<string[]>(
     initialItemId ? [initialItemId] : [],
   );
+  const [reordering, setReordering] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<StudyItem>();
   const [deleting, setDeleting] = useState<StudyItem>();
@@ -69,99 +71,127 @@ export function RoadmapItems({
         <h2>
           学習項目 <span className="count">{themeItems.length}</span>
         </h2>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setEditing(undefined);
-            setFormOpen(true);
-          }}
-        >
-          <Plus />
-          項目を追加
-        </Button>
+        <div className="item-management-actions">
+          {!preview && themeItems.length > 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() => {
+                setReordering((value) => !value);
+                setError("");
+              }}
+              aria-pressed={reordering}
+            >
+              <ArrowUpDown />
+              {reordering ? "並び替え完了" : "並び替え"}
+            </Button>
+          )}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setEditing(undefined);
+              setFormOpen(true);
+            }}
+          >
+            <Plus />
+            項目を追加
+          </Button>
+        </div>
       </div>
       {themeItems.length ? (
-        <Accordion.Root
-          type="multiple"
-          value={expanded}
-          onValueChange={setExpanded}
-          className="roadmap-items"
-          id={listId}
-        >
-          {visibleItems.map((item) => {
-            const level = latestMastery(masteryHistory, {
-              type: "item",
-              id: item.id,
-            });
-            const state = level === undefined ? "unrated" : String(level);
-            return (
-              <Accordion.Item
-                value={item.id}
-                key={item.id}
-                className="roadmap-item"
-                data-learning-state={state}
-              >
-                <div className="roadmap-item-header">
-                  <Accordion.Header>
-                    <Accordion.Trigger
-                      className="roadmap-item-trigger"
-                      aria-label={item.title}
-                      aria-describedby={`learning-state-${item.id}`}
-                    >
-                      <span
-                        className="mastery-dot"
-                        data-level={state}
-                        aria-hidden="true"
-                      />
-                      <span className="item-title-state">
-                        <span>{item.title}</span>
-                        <MasteryBadge
-                          level={level}
-                          id={`learning-state-${item.id}`}
+        reordering ? (
+          <ReorderItems
+            themeId={themeId}
+            items={themeItems}
+            busy={busy}
+            onBusyChange={setBusy}
+            onError={setError}
+          />
+        ) : (
+          <Accordion.Root
+            type="multiple"
+            value={expanded}
+            onValueChange={setExpanded}
+            className="roadmap-items"
+            id={listId}
+          >
+            {visibleItems.map((item) => {
+              const level = latestMastery(masteryHistory, {
+                type: "item",
+                id: item.id,
+              });
+              const state = level === undefined ? "unrated" : String(level);
+              return (
+                <Accordion.Item
+                  value={item.id}
+                  key={item.id}
+                  className="roadmap-item"
+                  data-learning-state={state}
+                  id={`roadmap-item-${item.id}`}
+                >
+                  <div className="roadmap-item-header">
+                    <Accordion.Header>
+                      <Accordion.Trigger
+                        className="roadmap-item-trigger"
+                        aria-label={item.title}
+                        aria-describedby={`learning-state-${item.id}`}
+                      >
+                        <span
+                          className="mastery-dot"
+                          data-level={state}
+                          aria-hidden="true"
                         />
-                      </span>
-                      <ChevronDown size={17} />
-                    </Accordion.Trigger>
-                  </Accordion.Header>
-                  <ActionMenu
-                    label={`${item.title}のメニュー`}
-                    onEdit={() => {
-                      setEditing(item);
-                      setFormOpen(true);
-                    }}
-                    onDelete={() => {
-                      setError("");
-                      setDeleting(item);
-                    }}
-                  />
-                </div>
-                <Accordion.Content className="roadmap-item-content">
-                  <div className="roadmap-item-body">
-                    <dl className="item-goal">
-                      <dt>到達目標</dt>
-                      <dd>{item.goal || "未設定"}</dd>
-                    </dl>
-                    {item.completed && (
-                      <span className="legacy-rating">旧版：習得済み</span>
-                    )}
-                    <MasteryControl
-                      themeId={themeId}
-                      target={{ type: "item", id: item.id }}
-                      name={item.title}
-                      compact={preview}
-                    />
-                    <DailyActions
-                      themeId={themeId}
-                      itemId={item.id}
-                      fromTheme={preview}
+                        <span className="item-title-state">
+                          <span>{item.title}</span>
+                          <MasteryBadge
+                            level={level}
+                            id={`learning-state-${item.id}`}
+                          />
+                        </span>
+                        <ChevronDown size={17} />
+                      </Accordion.Trigger>
+                    </Accordion.Header>
+                    <ActionMenu
+                      label={`${item.title}のメニュー`}
+                      onEdit={() => {
+                        setEditing(item);
+                        setFormOpen(true);
+                      }}
+                      onDelete={() => {
+                        setError("");
+                        setDeleting(item);
+                      }}
                     />
                   </div>
-                </Accordion.Content>
-              </Accordion.Item>
-            );
-          })}
-        </Accordion.Root>
+                  <Accordion.Content className="roadmap-item-content">
+                    <div className="roadmap-item-body">
+                      <dl className="item-goal">
+                        <dt>到達目標</dt>
+                        <dd>{item.goal || "未設定"}</dd>
+                      </dl>
+                      {item.completed && (
+                        <span className="legacy-rating">旧版：習得済み</span>
+                      )}
+                      <MasteryControl
+                        themeId={themeId}
+                        target={{ type: "item", id: item.id }}
+                        name={item.title}
+                        compact={preview}
+                      />
+                      <DailyActions
+                        themeId={themeId}
+                        itemId={item.id}
+                        fromTheme={preview}
+                      />
+                    </div>
+                  </Accordion.Content>
+                </Accordion.Item>
+              );
+            })}
+          </Accordion.Root>
+        )
       ) : (
         <p className="quiet-empty">項目を追加して、学びを小さく。</p>
       )}

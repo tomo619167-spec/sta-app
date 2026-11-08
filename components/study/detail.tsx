@@ -15,7 +15,7 @@ import { features } from "@/lib/features";
 import { examHref, roadmapHref } from "@/lib/learning-context";
 import { useStudy } from "./provider";
 import { studyRepository } from "@/lib/storage";
-import { BackLink, Progress, RecordList } from "./shared";
+import { BackLink, RecordList } from "./shared";
 import { ThemeForm } from "./theme-form";
 import { RecordForm } from "./record-form";
 import { ActionMenu } from "./action-menu";
@@ -25,6 +25,7 @@ import { latestMastery, masteryCounts } from "@/lib/ratings";
 import { MasteryBadge } from "./mastery-badge";
 import { MasteryEditor } from "./mastery-control";
 import { RoadmapItems } from "./roadmap-items";
+import { RoadmapManager } from "./roadmap-manager";
 import { SubjectExamsScreen } from "./subject-exams";
 export function MissingTheme() {
   return (
@@ -223,36 +224,6 @@ export function DetailScreen({
     </div>
   );
 }
-function RoadmapScreen({
-  themeId,
-  itemId,
-}: {
-  themeId: string;
-  itemId?: string;
-}) {
-  const { themes, items, masteryHistory } = useStudy();
-  const theme = themes.find((theme) => theme.id === themeId);
-  if (!theme) return <MissingTheme />;
-  return (
-    <>
-      <BackLink href={`/themes/${themeId}`}>テーマに戻る</BackLink>
-      <header className="roadmap-heading">
-        <h1>ロードマップ</h1>
-        <p>{theme.name}</p>
-        <Progress
-          items={items.filter((item) => item.themeId === themeId)}
-          label={theme.name}
-          history={masteryHistory}
-        />
-      </header>
-      <RoadmapItems
-        key={`${themeId}:${itemId ?? ""}`}
-        themeId={themeId}
-        initialItemId={itemId}
-      />
-    </>
-  );
-}
 export function FeatureScreen({
   id,
   slug,
@@ -277,7 +248,8 @@ export function FeatureScreen({
         fromTheme={fromTheme}
       />
     );
-  if (slug === "roadmap") return <RoadmapScreen themeId={id} itemId={itemId} />;
+  if (slug === "roadmap")
+    return <RoadmapManager themeId={id} itemId={itemId} />;
   if (slug === "past-exams")
     return <SubjectExamsScreen subjectId={theme.subjectId} themeId={id} />;
   const feature = features.find((feature) => feature.slug === slug);

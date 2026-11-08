@@ -100,7 +100,9 @@ test("roadmap items, records, learning entries and confirmed deletion persist", 
   await page
     .getByRole("textbox", { name: "学習項目", exact: true })
     .fill("革命が起きた原因");
-  await page.getByLabel("到達目標").fill("原因を自分の言葉で説明できる");
+  await page
+    .getByRole("textbox", { name: /^到達目標/ })
+    .fill("原因を自分の言葉で説明できる");
   await activate(page.getByRole("button", { name: "保存", exact: true }));
   await activate(
     page.getByRole("button", { name: "革命が起きた原因", exact: true }),
@@ -117,7 +119,7 @@ test("roadmap items, records, learning entries and confirmed deletion persist", 
   await page
     .getByRole("textbox", { name: "学習項目", exact: true })
     .fill("身分制と財政難");
-  await expect(page.getByLabel("到達目標")).toHaveValue(
+  await expect(page.getByRole("textbox", { name: /^到達目標/ })).toHaveValue(
     "原因を自分の言葉で説明できる",
   );
   await activate(page.getByRole("button", { name: "保存", exact: true }));
@@ -386,7 +388,9 @@ async function addItem(page: Page, title = "革命が起きた原因") {
   await page
     .getByRole("textbox", { name: "学習項目", exact: true })
     .fill(title);
-  await page.getByLabel("到達目標").fill("自分の言葉で説明できる");
+  await page
+    .getByRole("textbox", { name: /^到達目標/ })
+    .fill("自分の言葉で説明できる");
   await activate(page.getByRole("button", { name: "保存", exact: true }));
   await activate(page.getByRole("button", { name: title, exact: true }));
 }
@@ -1227,4 +1231,374 @@ test("theme mastery badge is read-only while its menu edits the existing history
   await expect(
     page.getByRole("region", { name: "習得度の履歴" }).locator("li strong"),
   ).toHaveText(["学習中", "定着した"]);
+});
+
+function roadmapJSON(items: { title: string; goal: string }[]) {
+  return JSON.stringify({
+    version: 1,
+    subject: "世界史",
+    theme: "フランス革命",
+    items,
+  });
+}
+async function openRoadmap(page: Page) {
+  await activate(
+    page.getByRole("link", { name: "ロードマップを見る", exact: true }),
+  );
+  await expect(
+    page.getByRole("heading", { name: "ロードマップ", level: 1 }),
+  ).toBeVisible();
+}
+test("Phase 2 goal, ordered items, next suggestion and assessments survive reorder, edit, delete and reload", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await createTheme(page);
+  const themeUrl = page.url();
+  await openRoadmap(page);
+  await activate(page.getByRole("button", { name: "目標を編集", exact: true }));
+  await page
+    .getByRole("textbox", { name: "テーマ全体の到達目標", exact: true })
+    .fill("政治と社会の変化を比較して説明できる");
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "テーマ全体の到達目標" }),
+  ).toContainText("政治と社会の変化を比較して説明できる");
+  for (const [title, level] of [
+    ["概要", "説明できる"],
+    ["原因", "学習中"],
+    ["影響", "未着手"],
+  ]) {
+    await addItem(page, title);
+    await changeMastery(page, level);
+  }
+  await expect(
+    page.getByRole("link", { name: "次に取り組む：原因", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".roadmap-totals")).toContainText("全 3 項目");
+  await expect(page.locator(".roadmap-totals")).toContainText(
+    "説明できる以上 1 項目",
+  );
+  await expect(page.locator(".roadmap-overview")).not.toContainText("%");
+  await activate(page.getByRole("button", { name: "並び替え", exact: true }));
+  await expect(
+    page.getByRole("button", { name: "概要を上へ", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "影響を下へ", exact: true }),
+  ).toBeDisabled();
+  await activate(page.getByRole("button", { name: "影響を上へ", exact: true }));
+  await expect(page.locator(".reorder-list li strong")).toHaveText([
+    "概要",
+    "影響",
+    "原因",
+  ]);
+  await activate(
+    page.getByRole("button", { name: "並び替え完了", exact: true }),
+  );
+  await page.reload();
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["概要", "影響", "原因"],
+  );
+  await expect(
+    page.getByRole("link", { name: "次に取り組む：影響", exact: true }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("link", { name: "次に取り組む：影響", exact: true }),
+  );
+  await expect(
+    page.getByRole("button", { name: "影響", exact: true }),
+  ).toHaveAttribute("aria-expanded", "true");
+  const row = page
+    .locator(".roadmap-item")
+    .filter({ has: page.getByRole("button", { name: "影響", exact: true }) });
+  await expect(row.locator(".mastery-control strong")).toHaveText("未着手");
+  await activate(
+    page.getByRole("button", { name: "影響のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "編集", exact: true }));
+  await page
+    .getByRole("textbox", { name: "学習項目", exact: true })
+    .fill("結果");
+  await page
+    .getByRole("textbox", { name: /^到達目標/ })
+    .fill("変化を自分の言葉で説明できる");
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByText("変化を自分の言葉で説明できる", { exact: true }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("button", { name: "結果のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
+  await activate(page.getByRole("button", { name: "削除する", exact: true }));
+  await expect(page.locator(".roadmap-item")).toHaveCount(2);
+  await expect(
+    page.getByRole("link", { name: "次に取り組む：原因", exact: true }),
+  ).toBeVisible();
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.goto(themeUrl);
+  await activate(page.locator(".theme-goal-disclosure summary"));
+  await expect(
+    page.getByText("政治と社会の変化を比較して説明できる", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".items-preview .item-title-state > span:first-child"),
+  ).toHaveText(["概要", "原因"]);
+});
+
+test("Phase 2 fixed prompt copies the matching JSON schema and previews an append before saving above a keyboard", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          (window as Window & { copiedRoadmap?: string }).copiedRoadmap = value;
+        },
+      },
+    });
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await createTheme(page);
+  await openRoadmap(page);
+  await addItem(page, "既存の項目");
+  await activate(
+    page.getByRole("button", { name: "外部AIで作る", exact: true }),
+  );
+  await expect(page.getByLabel("科目", { exact: true })).toHaveValue("世界史");
+  await expect(page.getByLabel("学習テーマ", { exact: true })).toHaveValue(
+    "フランス革命",
+  );
+  await page
+    .getByLabel("生成用の到達目標", { exact: true })
+    .fill("変化を説明できる");
+  await page
+    .getByLabel("学習レベル", { exact: true })
+    .selectOption("university");
+  await page.getByLabel("補足情報").fill("初学者・定期試験対策");
+  await activate(
+    page.getByRole("button", { name: "プロンプトを確認", exact: true }),
+  );
+  await expect(
+    page.getByLabel("生成したプロンプト", { exact: true }),
+  ).toContainText('"version": 1');
+  await activate(
+    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
+  );
+  await expect(page.getByRole("status")).toHaveText("コピーしました");
+  const copied = await page.evaluate(
+    () => (window as Window & { copiedRoadmap?: string }).copiedRoadmap!,
+  );
+  expect(copied).toContain("初学者・定期試験対策");
+  expect(copied).toContain("大学");
+  const generated = JSON.parse(copied.split("\n\n").at(-1)!);
+  expect(Object.keys(generated)).toEqual([
+    "version",
+    "subject",
+    "theme",
+    "items",
+  ]);
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(
+    page.getByRole("region", { name: "テーマ全体の到達目標" }),
+  ).toContainText("背景と影響");
+  await activate(
+    page.getByRole("button", { name: "JSONを取り込む", exact: true }),
+  );
+  await page
+    .getByRole("textbox", { name: "JSON", exact: true })
+    .fill(JSON.stringify(generated));
+  await page.evaluate(() => {
+    Object.defineProperty(visualViewport!, "height", {
+      configurable: true,
+      get: () => 320,
+    });
+    Object.defineProperty(visualViewport!, "offsetTop", {
+      configurable: true,
+      get: () => 60,
+    });
+    visualViewport!.dispatchEvent(new Event("resize"));
+  });
+  await expect(page.getByRole("dialog")).toHaveCSS("height", "320px");
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await expect(
+    page.getByRole("list", { name: "取り込みプレビュー" }),
+  ).toContainText(generated.items[0].title);
+  await expect(page.locator(".roadmap-item")).toHaveCount(1);
+  const save = page.getByRole("button", {
+    name: "項目を追加する",
+    exact: true,
+  });
+  const box = await save.boundingBox();
+  expect(box!.y + box!.height).toBeLessThanOrEqual(380);
+  await activate(save);
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.reload();
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["既存の項目", generated.items[0].title],
+  );
+  await expect(page.locator(".roadmap-item .mastery-badge")).toHaveText([
+    "未評価",
+    "未評価",
+  ]);
+});
+
+test("Phase 2 JSON syntax, context and duplicates are explicit and never replace an existing item", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await createTheme(page);
+  await openRoadmap(page);
+  await addItem(page, "既存の項目");
+  await activate(
+    page.getByRole("button", { name: "JSONを取り込む", exact: true }),
+  );
+  const source = page.getByRole("textbox", { name: "JSON", exact: true });
+  for (const [value, message] of [
+    ["{", "構文"],
+    [JSON.stringify({ version: 2 }), "version"],
+    [roadmapJSON([{ title: "原因", goal: "" }]), "items[0].goal"],
+    [
+      roadmapJSON([{ title: "原因", goal: "説明" }]).replace("世界史", "数学"),
+      "subject",
+    ],
+  ]) {
+    await source.fill(value);
+    await activate(
+      page.getByRole("button", { name: "プレビュー", exact: true }),
+    );
+    await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+      message,
+    );
+    await expect(page.locator(".roadmap-item")).toHaveCount(1);
+  }
+  await source.fill(
+    roadmapJSON([
+      { title: "既存の項目", goal: "別の目標" },
+      { title: "影響", goal: "変化を説明できる" },
+      { title: "影響", goal: "変化を比較できる" },
+    ]),
+  );
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await expect(page.getByText("既存項目と重複", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("取り込み内で重複", { exact: true }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("button", { name: "項目を追加する", exact: true }),
+  );
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "重複",
+  );
+  await expect(page.locator(".roadmap-item")).toHaveCount(1);
+  await activate(
+    page.getByRole("checkbox", { name: "重複した項目も追加する", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "項目を追加する", exact: true }),
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["既存の項目", "既存の項目", "影響", "影響"],
+  );
+  await page.reload();
+  await activate(
+    page.getByRole("button", { name: "既存の項目", exact: true }).first(),
+  );
+  await expect(page.locator(".roadmap-item").first()).toContainText(
+    "自分の言葉で説明できる",
+  );
+});
+
+test("Phase 2 failed batch import leaves no partial rows and clipboard denial keeps a selectable prompt", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const add = IDBObjectStore.prototype.add;
+    let count = 0;
+    IDBObjectStore.prototype.add = function (
+      ...args: Parameters<IDBObjectStore["add"]>
+    ) {
+      if (
+        this.name === "items" &&
+        String((args[0] as { title?: string }).title).startsWith("取込") &&
+        ++count === 2
+      )
+        throw new DOMException("Quota", "QuotaExceededError");
+      return add.apply(this, args);
+    };
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async () => {
+          throw new DOMException("Denied", "NotAllowedError");
+        },
+      },
+    });
+  });
+  await page.goto("/");
+  await createTheme(page);
+  await openRoadmap(page);
+  await addItem(page, "残す項目");
+  await activate(
+    page.getByRole("button", { name: "JSONを取り込む", exact: true }),
+  );
+  await page.getByRole("textbox", { name: "JSON", exact: true }).fill(
+    roadmapJSON([
+      { title: "取込A", goal: "目標A" },
+      { title: "取込B", goal: "目標B" },
+    ]),
+  );
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await activate(
+    page.getByRole("button", { name: "項目を追加する", exact: true }),
+  );
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "既存の項目は変更していません",
+  );
+  await expect(
+    page.getByRole("list", { name: "取り込みプレビュー" }),
+  ).toContainText("取込A");
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await page.reload();
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["残す項目"],
+  );
+  await activate(
+    page.getByRole("button", { name: "外部AIで作る", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "プロンプトを確認", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
+  );
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
+    "コピーできませんでした",
+  );
+  await expect(
+    page.getByLabel("生成したプロンプト", { exact: true }),
+  ).toHaveValue(/version/);
+  await activate(
+    page.getByRole("button", { name: "プロンプトを選択", exact: true }),
+  );
+  const selection = await page
+    .getByLabel("生成したプロンプト", { exact: true })
+    .evaluate((node: HTMLTextAreaElement) => ({
+      start: node.selectionStart,
+      end: node.selectionEnd,
+      length: node.value.length,
+    }));
+  expect(selection.start).toBe(0);
+  expect(selection.end).toBe(selection.length);
 });

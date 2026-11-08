@@ -25,6 +25,12 @@ import {
   type SubjectIconSetting,
 } from "../subject-icons";
 import { validateFourLevel } from "../ratings";
+import {
+  parseRoadmapJSON,
+  assertRoadmapContext,
+  findRoadmapDuplicates,
+} from "../roadmap-json";
+import { sortStudyItems } from "../roadmap";
 import type { StudyRepository } from "./repository";
 interface StudyDB extends DBSchema {
   "subject-icons": { key: string; value: SubjectIconSetting };
@@ -347,6 +353,105 @@ export class IndexedDBStudyRepository implements StudyRepository {
       throw error;
     }
   }
+  async updateThemeGoal(id: string, goal: string) {
+    const value = validateGoal(goal);
+    const tx = (await this.db()).transaction("themes", "readwrite");
+    try {
+      const theme = await tx.store.get(id);
+      if (!theme) throw new Error("テーマが見つかりません。");
+      const updated = {
+        ...theme,
+        description: value,
+        updatedAt: new Date().toISOString(),
+      };
+      await tx.store.put(updated);
+      await tx.done;
+      return updated;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async moveItem(themeId: string, itemId: string, direction: "up" | "down") {
+    if (direction !== "up" && direction !== "down")
+      throw new Error("移動方向を確認してください。");
+    const tx = (await this.db()).transaction(["themes", "items"], "readwrite");
+    try {
+      if (!(await tx.objectStore("themes").get(themeId)))
+        throw new Error("テーマが見つかりません。");
+      const items = sortStudyItems(
+        await tx.objectStore("items").index("by-theme").getAll(themeId),
+      );
+      const index = items.findIndex((item) => item.id === itemId);
+      if (index < 0)
+        throw new Error("学習項目が見つからないか、別のテーマに属しています。");
+      const next = index + (direction === "up" ? -1 : 1);
+      if (next >= 0 && next < items.length) {
+        [items[index], items[next]] = [items[next], items[index]];
+        const now = new Date().toISOString();
+        for (const [position, item] of items.entries())
+          if (position !== item.position) {
+            await tx
+              .objectStore("items")
+              .put({ ...item, position, updatedAt: now });
+          }
+      }
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
+  async importRoadmap(
+    themeId: string,
+    source: string,
+    allowDuplicates = false,
+  ) {
+    const document = parseRoadmapJSON(source);
+    const tx = (await this.db()).transaction(
+      ["themes", "subjects", "items"],
+      "readwrite",
+    );
+    try {
+      const theme = await tx.objectStore("themes").get(themeId);
+      if (!theme) throw new Error("テーマが見つかりません。");
+      const subject = await tx.objectStore("subjects").get(theme.subjectId);
+      if (!subject) throw new Error("科目が見つかりません。");
+      assertRoadmapContext(document, subject.name, theme.name);
+      const existing = await tx
+        .objectStore("items")
+        .index("by-theme")
+        .getAll(themeId);
+      if (
+        findRoadmapDuplicates(document.items, existing).length &&
+        !allowDuplicates
+      )
+        throw new Error(
+          "同じ名前の項目があります。プレビューで重複を確認してください。",
+        );
+      const start = Math.max(-1, ...existing.map((item) => item.position)) + 1;
+      const now = new Date().toISOString();
+      const added: StudyItem[] = [];
+      for (const [index, item] of document.items.entries()) {
+        const value: StudyItem = {
+          ...item,
+          id: crypto.randomUUID(),
+          themeId,
+          completed: false,
+          position: start + index,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await tx.objectStore("items").add(value);
+        added.push(value);
+      }
+      await tx.done;
+      return added;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
+  }
   async deleteTheme(id: string) {
     const tx = (await this.db()).transaction(
       [
@@ -385,10 +490,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
     const items = themeId
       ? await db.getAllFromIndex("items", "by-theme", themeId)
       : await db.getAll("items");
-    return items.sort(
-      (a, b) =>
-        a.position - b.position || a.createdAt.localeCompare(b.createdAt),
-    );
+    return sortStudyItems(items);
   }
   async createItem(themeId: string, title: string, goal = "") {
     const targetGoal = validateGoal(goal);
