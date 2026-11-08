@@ -12,7 +12,7 @@ export function ActionMenu({
 }: {
   label: string;
   editLabel?: string;
-  onEdit: () => void;
+  onEdit?: () => void;
   onDelete?: () => void;
   onIcon?: () => void;
   onMastery?: () => void;
@@ -31,7 +31,9 @@ export function ActionMenu({
           align="end"
           collisionPadding={12}
         >
-          <DropdownMenu.Item onSelect={onEdit}>{editLabel}</DropdownMenu.Item>
+          {onEdit && (
+            <DropdownMenu.Item onSelect={onEdit}>{editLabel}</DropdownMenu.Item>
+          )}
           {onMastery && (
             <DropdownMenu.Item onSelect={onMastery}>
               習得度を変更

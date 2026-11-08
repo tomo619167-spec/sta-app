@@ -1,3 +1,5 @@
+import type { LearningDraft } from "../learning";
+import type { FeedbackDraft, LearningFeedback } from "../learning-feedback";
 import type { RoadmapDraft } from "../roadmap-draft";
 import type { SubjectIconKey, SubjectIconSetting } from "../subject-icons";
 import type {
@@ -12,6 +14,15 @@ import type {
   ThemeInput,
 } from "../model";
 export interface StudyRepository {
+  getLearningDraft(key: string): Promise<LearningDraft | undefined>;
+  saveLearningDraft(draft: LearningDraft): Promise<void>;
+  saveLearningRecord(draft: LearningDraft): Promise<StudyRecord>;
+  deleteRecord(id: string): Promise<void>;
+  listFeedbacks(): Promise<LearningFeedback[]>;
+  getFeedbackDraft(recordId: string): Promise<FeedbackDraft | undefined>;
+  saveFeedbackDraft(draft: FeedbackDraft): Promise<void>;
+  importFeedback(recordId: string, source: string): Promise<LearningFeedback>;
+
   getRoadmapDraft(themeId: string): Promise<RoadmapDraft | undefined>;
   saveRoadmapDraft(draft: RoadmapDraft): Promise<void>;
   listSubjectIcons(): Promise<SubjectIconSetting[]>;

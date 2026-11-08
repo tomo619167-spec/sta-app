@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useId, useState } from "react";
 import { Accordion } from "radix-ui";
 import { Plus, ChevronDown, ArrowUpDown } from "lucide-react";
@@ -185,6 +186,12 @@ export function RoadmapItems({
                         itemId={item.id}
                         fromTheme={preview}
                       />
+                      <Link
+                        className="item-records-link"
+                        href={`/history?theme=${encodeURIComponent(themeId)}&item=${encodeURIComponent(item.id)}`}
+                      >
+                        この項目の記録
+                      </Link>
                     </div>
                   </Accordion.Content>
                 </Accordion.Item>

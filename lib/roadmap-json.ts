@@ -1,3 +1,9 @@
+import {
+  jsonObject as object,
+  jsonKeys as keys,
+  jsonText as text,
+  parseJSONDocument,
+} from "./json";
 /** External AI exchanges plain JSON only. Never accepts IDs, mastery or executable content. */
 export const ROADMAP_JSON_VERSION = 1 as const;
 export const ROADMAP_MAX_ITEMS = 50;
@@ -19,43 +25,11 @@ export function normalizeRoadmapText(value: string) {
     .replace(/\s+/gu, " ")
     .toLocaleLowerCase("ja-JP");
 }
-function object(value: unknown, path: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    throw new Error(`${path}：オブジェクトで指定してください。`);
-  return value as Record<string, unknown>;
-}
-function keys(value: Record<string, unknown>, allowed: string[], path: string) {
-  const unexpected = Object.keys(value).find((key) => !allowed.includes(key));
-  if (unexpected)
-    throw new Error(
-      `${path}.${unexpected}：未対応の項目です。指定された形式を使用してください。`,
-    );
-}
-function text(value: unknown, path: string, max: number) {
-  if (typeof value !== "string" || !value.trim())
-    throw new Error(`${path}：空でない文字列が必要です。`);
-  if (value.trim().length > max)
-    throw new Error(`${path}：${max}文字以内で指定してください。`);
-  return value.trim();
-}
 export function parseRoadmapJSON(source: string): RoadmapDocument {
-  if (source.length > ROADMAP_MAX_JSON_LENGTH)
-    throw new Error(
-      `JSON：${ROADMAP_MAX_JSON_LENGTH.toLocaleString("ja-JP")}文字以内で貼り付けてください。`,
-    );
-  if (source.trim().startsWith("```"))
-    throw new Error(
-      "JSONのみを貼り付けてください。先頭と末尾のコードブロック記号（```）は不要です。",
-    );
-  let raw: unknown;
-  try {
-    raw = JSON.parse(source);
-  } catch (error) {
-    throw new Error(
-      `JSONの構文を確認してください。引用符・カンマ・括弧に誤りがあります。${error instanceof Error ? `（${error.message.slice(0, 140)}）` : ""}`,
-    );
-  }
-  const root = object(raw, "JSON");
+  const root = object(
+    parseJSONDocument(source, ROADMAP_MAX_JSON_LENGTH),
+    "JSON",
+  );
   if (root.version !== ROADMAP_JSON_VERSION)
     throw new Error(
       `version：対応している形式は数値の${ROADMAP_JSON_VERSION}です。`,

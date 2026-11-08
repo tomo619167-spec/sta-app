@@ -1,4 +1,5 @@
 "use client";
+import type { LearningFeedback } from "@/lib/learning-feedback";
 import {
   createContext,
   useCallback,
@@ -18,6 +19,7 @@ import type {
 } from "@/lib/model";
 import type { SubjectIconSetting } from "@/lib/subject-icons";
 interface StudyState {
+  feedbacks: LearningFeedback[];
   subjectIcons: SubjectIconSetting[];
   masteryHistory: MasteryChange[];
   themes: Theme[];
@@ -30,6 +32,7 @@ interface StudyState {
 }
 const Context = createContext<StudyState | null>(null);
 export function StudyProvider({ children }: { children: ReactNode }) {
+  const [feedbacks, setFeedbacks] = useState<LearningFeedback[]>([]);
   const [subjectIcons, setSubjectIcons] = useState<SubjectIconSetting[]>([]);
   const [masteryHistory, setMasteryHistory] = useState<MasteryChange[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
@@ -43,7 +46,7 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
-      const [themes, records, subjects, items, icons, history] =
+      const [themes, records, subjects, items, icons, history, feedbacks] =
         await Promise.all([
           studyRepository.listThemes(),
           studyRepository.listRecords(),
@@ -51,8 +54,10 @@ export function StudyProvider({ children }: { children: ReactNode }) {
           studyRepository.listItems(),
           studyRepository.listSubjectIcons(),
           studyRepository.listMasteryHistory(),
+          studyRepository.listFeedbacks(),
         ]);
       if (request !== generation.current) return;
+      setFeedbacks(feedbacks);
       setSubjectIcons(icons);
       setMasteryHistory(history);
       setSubjects(subjects);
@@ -88,6 +93,7 @@ export function StudyProvider({ children }: { children: ReactNode }) {
     <Context.Provider
       value={{
         themes,
+        feedbacks,
         subjectIcons,
         masteryHistory,
         records,

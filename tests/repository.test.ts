@@ -1,3 +1,17 @@
+import {
+  initialLearningDraft,
+  learningDraftKey,
+  recordRevision,
+  recordSnapshot,
+  validateLearningInput,
+} from "../lib/learning";
+import {
+  feedbackExample,
+  buildFeedbackPrompt,
+  parseFeedbackJSON,
+  assertFeedbackContext,
+  initialFeedbackDraft,
+} from "../lib/learning-feedback";
 import { newRoadmapDraft, validateRoadmapDraft } from "../lib/roadmap-draft";
 import "fake-indexeddb/auto";
 import {
@@ -502,7 +516,7 @@ async function seedV3(name: string) {
   db.close();
   return { old, original };
 }
-test("v3 to v5 preserves every existing store byte-equivalently and never converts old percentages or mastery", async () => {
+test("v3 to v6 preserves every existing store byte-equivalently and never converts old percentages or mastery", async () => {
   const name = crypto.randomUUID();
   const { old, original } = await seedV3(name);
   const repo = repository(name);
@@ -528,7 +542,7 @@ test("v3 to v5 preserves every existing store byte-equivalently and never conver
   );
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 5);
+  assert.equal(db.version, 6);
   for (const [store, rows] of Object.entries(original))
     assert.deepEqual(await db.getAll(store), rows);
   db.close();
@@ -1136,15 +1150,15 @@ async function seedV4(name: string) {
   db.close();
   return { old, rows };
 }
-test("v4 to v5 adds only an empty draft store and preserves all eight stores, manual icons and ratings", async () => {
+test("v4 to v6 adds draft and feedback stores and preserves all eight original stores", async () => {
   const name = crypto.randomUUID();
   const { old, rows } = await seedV4(name);
   const repo = repository(name);
   assert.equal(await repo.getRoadmapDraft(old.theme.id), undefined);
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 5);
-  assert.equal(db.objectStoreNames.length, 9);
+  assert.equal(db.version, 6);
+  assert.equal(db.objectStoreNames.length, 12);
   for (const [store, values] of Object.entries(rows))
     assert.deepEqual(await db.getAll(store), values);
   assert.deepEqual(await db.getAll("roadmap-drafts"), []);
@@ -1176,7 +1190,7 @@ test("failed v5 draft-store creation rolls back to v4 and retries safely", async
   assert.ok((await repo.listThemes()).length);
   await repo.close();
   const upgraded = await openDB(name);
-  assert.equal(upgraded.version, 5);
+  assert.equal(upgraded.version, 6);
   upgraded.close();
 });
 test("versioned drafts retain unfinished inputs and step separately per theme and disappear with their theme", async () => {
@@ -1271,4 +1285,388 @@ test("successful import removes only its draft atomically; invalid JSON and abor
     (await repo.listItems(theme.id)).map((i) => i.title),
     ["残す項目", "新規A", "新規B"],
   );
+});
+
+async function learningSetup() {
+  const { repo, input, subject } = await setup();
+  const theme = await repo.createTheme(input);
+  const item = await repo.createItem(theme.id, "原因", "原因を説明できる");
+  return {
+    repo,
+    theme,
+    item,
+    subject,
+    themeTarget: { type: "theme" as const, id: theme.id },
+    itemTarget: { type: "item" as const, id: item.id },
+  };
+}
+test("output drafts survive reopening per target and every save adds an independently rated timestamped record", async () => {
+  const { repo, theme, themeTarget, itemTarget } = await learningSetup();
+  const themeDraft = {
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "記憶からの説明\n".repeat(2000),
+    outputRating: 4 as const,
+  };
+  const itemDraft = {
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    note: "項目の説明",
+  };
+  const deepenDraft = initialLearningDraft(theme.id, itemTarget, "deepen");
+  await repo.saveLearningDraft(themeDraft);
+  await repo.saveLearningDraft(itemDraft);
+  await repo.saveLearningDraft(deepenDraft);
+  await repo.close();
+  assert.deepEqual(await repo.getLearningDraft(themeDraft.key), themeDraft);
+  const first = await repo.saveLearningRecord(themeDraft);
+  assert.equal(first.outputRating, 4);
+  assert.equal(first.note, themeDraft.note.trim());
+  assert.equal(first.createdAt, first.studiedAt);
+  assert.equal(first.updatedAt, first.createdAt);
+  assert.equal(await repo.getLearningDraft(themeDraft.key), undefined);
+  assert.deepEqual(await repo.getLearningDraft(itemDraft.key), itemDraft);
+  const second = await repo.saveLearningRecord(itemDraft);
+  assert.equal(second.outputRating, undefined);
+  assert.equal(second.targetId, itemTarget.id);
+  assert.notEqual(first.id, second.id);
+  for (const level of [1, 2, 3, 4] as const) {
+    const record = await repo.saveLearningRecord({
+      ...itemDraft,
+      outputRating: level,
+    });
+    assert.equal(record.outputRating, level);
+  }
+  assert.equal((await repo.listRecords()).length, 6);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+  assert.deepEqual(await repo.getLearningDraft(deepenDraft.key), deepenDraft);
+});
+test("deepening partial drafts resume, edits retain the original date and output ratings never update mastery", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  const partial = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    questionKind: "whatif" as const,
+    question: "もし条件が違ったら？",
+    hypothesis: "",
+  };
+  await repo.saveLearningDraft(partial);
+  await repo.close();
+  assert.deepEqual(await repo.getLearningDraft(partial.key), partial);
+  await assert.rejects(repo.saveLearningRecord(partial), /仮説/);
+  const first = await repo.saveLearningRecord({
+    ...partial,
+    hypothesis: "まず自分で考えた仮説",
+    insight: "",
+  });
+  const edit = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen", first),
+    insight: "学び直した自分の気づき",
+  };
+  await repo.saveLearningDraft(edit);
+  const updated = await repo.saveLearningRecord(edit);
+  assert.equal(updated.id, first.id);
+  assert.equal(updated.createdAt, first.createdAt);
+  assert.equal(updated.studiedAt, first.studiedAt);
+  assert.ok(updated.updatedAt! > first.updatedAt!);
+  assert.equal(updated.insight, edit.insight);
+  assert.equal(updated.outputRating, undefined);
+  assert.equal(await repo.getLearningDraft(edit.key), undefined);
+  assert.equal((await repo.listRecords()).length, 1);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+});
+test("failed learning save rolls back record, theme timestamp and draft removal together", async () => {
+  const { repo, theme, themeTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "保存に失敗しても残す",
+  };
+  await repo.saveLearningDraft(draft);
+  const del = IDBObjectStore.prototype.delete;
+  IDBObjectStore.prototype.delete = function (
+    ...args: Parameters<IDBObjectStore["delete"]>
+  ) {
+    if (this.name === "learning-drafts")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return del.apply(this, args);
+  };
+  try {
+    await assert.rejects(repo.saveLearningRecord(draft));
+  } finally {
+    IDBObjectStore.prototype.delete = del;
+  }
+  assert.deepEqual(await repo.listRecords(), []);
+  assert.deepEqual(await repo.getTheme(theme.id), theme);
+  assert.deepEqual(await repo.getLearningDraft(draft.key), draft);
+  await repo.saveLearningRecord(draft);
+  assert.equal((await repo.listRecords()).length, 1);
+});
+test("foreign targets, oversized inputs, stale edits and deleted parents never overwrite a learning record", async () => {
+  const { repo, theme, itemTarget, themeTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    note: "原文",
+  };
+  assert.throws(() =>
+    validateLearningInput({ ...draft, note: "a".repeat(30001) }),
+  );
+  await assert.rejects(
+    repo.saveLearningDraft({ ...draft, themeId: "missing" }),
+  );
+  const wrong = {
+    ...initialLearningDraft(
+      theme.id,
+      { type: "theme" as const, id: "foreign" },
+      "output",
+    ),
+    note: "誤った対象",
+  };
+  await assert.rejects(repo.saveLearningRecord(wrong), /対象/);
+  const first = await repo.saveLearningRecord(draft);
+  const edit = initialLearningDraft(theme.id, itemTarget, "output", first);
+  await repo.saveLearningRecord({ ...edit, note: "新しい原文" });
+  await assert.rejects(
+    repo.saveLearningRecord({ ...edit, note: "古い編集内容" }),
+    /更新/,
+  );
+  assert.equal((await repo.listRecords())[0].note, "新しい原文");
+  await repo.deleteItem(itemTarget.id);
+  await assert.rejects(repo.saveLearningDraft(draft));
+  const legacy = await repo.addRecord(theme.id, "旧評価を保持", {
+    target: themeTarget,
+    activity: "output",
+    completion: 60,
+  });
+  const changed = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, themeTarget, "output", legacy),
+    note: "明示的な編集",
+    outputRating: 2,
+  });
+  assert.equal(changed.completion, 60);
+  assert.equal(changed.outputRating, 2);
+});
+test("both feedback prompts produce the exact versioned schema and reject malformed, cross-target and assessment data", async () => {
+  const { repo, theme, item, itemTarget } = await learningSetup();
+  for (const activity of ["output", "deepen"] as const) {
+    const record = await repo.saveLearningRecord({
+      ...initialLearningDraft(theme.id, itemTarget, activity),
+      note: "自分で説明",
+      question: "なぜ？",
+      hypothesis: "自分の仮説",
+      insight: "",
+    });
+    const prompt = buildFeedbackPrompt(record, theme, "世界史", item);
+    const document = parseFeedbackJSON(prompt.split("\n\n").at(-1)!);
+    assert.deepEqual(document, feedbackExample(record));
+    assertFeedbackContext(document, record);
+    assert.match(prompt, /不確実/);
+    assert.match(prompt, /1〜3/);
+    for (const source of [
+      "{",
+      "```json\n{}\n```",
+      JSON.stringify({ ...document, version: 2 }),
+      JSON.stringify({ ...document, questions: [] }),
+      JSON.stringify({ ...document, questions: ["a", "b", "c", "d"] }),
+      JSON.stringify({ ...document, uncertainty: undefined }),
+      JSON.stringify({ ...document, outputRating: 4 }),
+      JSON.stringify({ ...document, mastery: 4 }),
+    ])
+      assert.throws(() => parseFeedbackJSON(source));
+    assert.throws(
+      () => assertFeedbackContext({ ...document, targetId: "foreign" }, record),
+      /対象/,
+    );
+    assert.throws(
+      () => assertFeedbackContext({ ...document, revision: "old" }, record),
+      /変更/,
+    );
+  }
+});
+test("AI feedback keeps its original snapshot, remains separate from insight and ratings, and rejects a stale revision", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  await repo.setMastery(theme.id, itemTarget, 2);
+  const record = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "なぜ税負担が問題？",
+    hypothesis: "自分の仮説",
+    insight: "自分の気づき",
+  });
+  const prompt = buildFeedbackPrompt(record, theme, "世界史");
+  const draft = {
+    ...initialFeedbackDraft(record, prompt),
+    active: true,
+    step: "json" as const,
+    source: "{ unfinished",
+  };
+  await repo.saveFeedbackDraft(draft);
+  await repo.close();
+  assert.deepEqual(await repo.getFeedbackDraft(record.id), draft);
+  const before = await repo.listRecords();
+  const history = await repo.listMasteryHistory();
+  const feedback = await repo.importFeedback(
+    record.id,
+    JSON.stringify(feedbackExample(record)),
+  );
+  assert.deepEqual(await repo.listRecords(), before);
+  assert.deepEqual(await repo.listMasteryHistory(), history);
+  assert.deepEqual(feedback.snapshot, recordSnapshot(record));
+  assert.equal(await repo.getFeedbackDraft(record.id), undefined);
+  const edited = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "deepen", record),
+    insight: "編集した自分の気づき",
+  });
+  await assert.rejects(
+    repo.importFeedback(record.id, JSON.stringify(feedbackExample(record))),
+    /変更/,
+  );
+  assert.equal(
+    (await repo.listFeedbacks())[0].snapshot.insight,
+    "自分の気づき",
+  );
+  assert.equal(edited.insight, "編集した自分の気づき");
+  const output = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    note: "本文",
+    outputRating: 3,
+  });
+  await repo.importFeedback(output.id, JSON.stringify(feedbackExample(output)));
+  assert.equal(
+    (await repo.listTargetRecords(itemTarget)).find(
+      (record) => record.id === output.id,
+    )?.outputRating,
+    3,
+  );
+});
+test("feedback registration and draft removal are atomic even when draft deletion fails", async () => {
+  const { repo, theme, themeTarget } = await learningSetup();
+  const record = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "本文",
+  });
+  const source = JSON.stringify(feedbackExample(record));
+  const draft = {
+    ...initialFeedbackDraft(
+      record,
+      buildFeedbackPrompt(record, theme, "世界史"),
+    ),
+    source,
+    step: "preview" as const,
+    active: true,
+  };
+  await repo.saveFeedbackDraft(draft);
+  const del = IDBObjectStore.prototype.delete;
+  IDBObjectStore.prototype.delete = function (
+    ...args: Parameters<IDBObjectStore["delete"]>
+  ) {
+    if (this.name === "feedback-drafts")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return del.apply(this, args);
+  };
+  try {
+    await assert.rejects(repo.importFeedback(record.id, source));
+  } finally {
+    IDBObjectStore.prototype.delete = del;
+  }
+  assert.deepEqual(await repo.listFeedbacks(), []);
+  assert.deepEqual(await repo.getFeedbackDraft(record.id), draft);
+  assert.deepEqual((await repo.listRecords())[0], record);
+  await repo.importFeedback(record.id, source);
+  assert.equal((await repo.listFeedbacks()).length, 1);
+  assert.equal(await repo.getFeedbackDraft(record.id), undefined);
+});
+test("record, item and theme deletion remove only their linked learning drafts and feedback", async () => {
+  const { repo, theme, themeTarget, itemTarget } = await learningSetup();
+  const itemDraft = {
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    note: "項目",
+  };
+  const themeDraft = {
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "テーマ",
+  };
+  const a = await repo.saveLearningRecord(itemDraft);
+  const b = await repo.saveLearningRecord(themeDraft);
+  await repo.importFeedback(a.id, JSON.stringify(feedbackExample(a)));
+  await repo.importFeedback(b.id, JSON.stringify(feedbackExample(b)));
+  await repo.saveLearningDraft(itemDraft);
+  await repo.saveLearningDraft(themeDraft);
+  await repo.saveFeedbackDraft(
+    initialFeedbackDraft(a, buildFeedbackPrompt(a, theme, "世界史")),
+  );
+  await repo.deleteRecord(a.id);
+  assert.equal((await repo.listFeedbacks()).length, 1);
+  assert.equal(await repo.getFeedbackDraft(a.id), undefined);
+  assert.deepEqual(await repo.getLearningDraft(itemDraft.key), itemDraft);
+  const again = await repo.saveLearningRecord(itemDraft);
+  await repo.saveLearningDraft(itemDraft);
+  await repo.importFeedback(again.id, JSON.stringify(feedbackExample(again)));
+  await repo.deleteItem(itemTarget.id);
+  assert.equal((await repo.listRecords()).length, 1);
+  assert.equal((await repo.listFeedbacks()).length, 1);
+  assert.equal(await repo.getLearningDraft(itemDraft.key), undefined);
+  assert.deepEqual(await repo.getLearningDraft(themeDraft.key), themeDraft);
+  await repo.deleteTheme(theme.id);
+  assert.deepEqual(await repo.listFeedbacks(), []);
+  assert.equal(await repo.getLearningDraft(themeDraft.key), undefined);
+});
+async function seedV5(name: string) {
+  const { old } = await seedV4(name);
+  const db = await openDB(name, 5, {
+    upgrade(db) {
+      db.createObjectStore("roadmap-drafts", { keyPath: "themeId" });
+    },
+  });
+  await db.put("roadmap-drafts", {
+    ...newRoadmapDraft(old.theme),
+    active: true,
+    step: "json",
+    source: "{ partial roadmap",
+  });
+  const rows: Record<string, unknown[]> = {};
+  for (const store of Array.from(db.objectStoreNames))
+    rows[store] = await db.getAll(store);
+  db.close();
+  return { old, rows };
+}
+test("v5 to v6 preserves every existing row including in-progress roadmap drafts and adds only empty learning stores", async () => {
+  const name = crypto.randomUUID();
+  const { rows } = await seedV5(name);
+  const repo = repository(name);
+  await repo.listRecords();
+  await repo.close();
+  const db = await openDB(name);
+  assert.equal(db.version, 6);
+  assert.equal(db.objectStoreNames.length, 12);
+  for (const [store, values] of Object.entries(rows))
+    assert.deepEqual(await db.getAll(store), values);
+  for (const store of [
+    "learning-drafts",
+    "learning-feedback",
+    "feedback-drafts",
+  ])
+    assert.deepEqual(await db.getAll(store), []);
+  db.close();
+});
+test("a failed v6 upgrade restores v5 and all its originals, then retries without duplicate learning data", async () => {
+  const name = crypto.randomUUID();
+  const { rows } = await seedV5(name);
+  const create = IDBDatabase.prototype.createObjectStore;
+  IDBDatabase.prototype.createObjectStore = function (
+    ...args: Parameters<IDBDatabase["createObjectStore"]>
+  ) {
+    if (args[0] === "learning-feedback")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return create.apply(this, args);
+  };
+  const repo = repository(name);
+  try {
+    await assert.rejects(repo.listRecords());
+  } finally {
+    IDBDatabase.prototype.createObjectStore = create;
+  }
+  const db = await openDB(name);
+  assert.equal(db.version, 5);
+  for (const [store, values] of Object.entries(rows))
+    assert.deepEqual(await db.getAll(store), values);
+  assert.equal(db.objectStoreNames.contains("learning-drafts"), false);
+  db.close();
+  assert.deepEqual(await repo.listFeedbacks(), []);
+  assert.ok((await repo.listRecords()).length);
 });

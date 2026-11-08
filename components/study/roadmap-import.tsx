@@ -1,4 +1,5 @@
 "use client";
+import { JSONSource } from "./json-source";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Theme } from "@/lib/model";
 import {
@@ -6,7 +7,6 @@ import {
   findRoadmapDuplicates,
   parseRoadmapJSON,
   roadmapExample,
-  ROADMAP_MAX_JSON_LENGTH,
 } from "@/lib/roadmap-json";
 import { studyRepository } from "@/lib/storage";
 import { useStudy } from "./provider";
@@ -179,27 +179,11 @@ export function RoadmapImport({
             <span>{subject}</span>
             <strong>{theme.name}</strong>
           </div>
-          <div>
-            <label htmlFor="roadmap-json">JSON</label>
-            <textarea
-              id="roadmap-json"
-              className="json-source"
-              rows={12}
-              maxLength={ROADMAP_MAX_JSON_LENGTH}
-              value={source}
-              onChange={(event) => onSourceChange(event.target.value)}
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              placeholder="外部AIが生成したJSONを貼り付け"
-            />
-          </div>
-          <details className="json-format">
-            <summary>受け付けるJSON形式（version 1）</summary>
-            <pre>
-              {JSON.stringify(roadmapExample(subject, theme.name), null, 2)}
-            </pre>
-          </details>
+          <JSONSource
+            value={source}
+            onChange={onSourceChange}
+            example={roadmapExample(subject, theme.name)}
+          />
         </>
       )}
     </fieldset>

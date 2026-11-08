@@ -3,8 +3,14 @@ export const metadata = { title: "学習記録" };
 export default async function Page({
   searchParams,
 }: {
-  searchParams: Promise<{ theme?: string }>;
+  searchParams: Promise<{ theme?: string; item?: string }>;
 }) {
-  const { theme } = await searchParams;
-  return <HistoryScreen key={theme ?? ""} initialTheme={theme} />;
+  const { theme, item } = await searchParams;
+  return (
+    <HistoryScreen
+      key={`${theme ?? ""}:${item ?? ""}`}
+      initialTheme={theme}
+      initialItem={item}
+    />
+  );
 }
