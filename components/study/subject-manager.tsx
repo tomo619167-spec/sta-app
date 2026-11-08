@@ -1,5 +1,5 @@
 "use client";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { EditorDialog } from "./editor-dialog";
 import { SubjectChoices } from "./subject-fields";
@@ -8,8 +8,10 @@ import { studyRepository } from "@/lib/storage";
 export function SubjectManager({
   open,
   onClose,
+  initialAction = "list",
 }: {
   open: boolean;
+  initialAction?: "list" | "create";
   onClose: () => void;
 }) {
   const { subjects, refresh } = useStudy();
@@ -18,6 +20,16 @@ export function SubjectManager({
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (open && !wasOpen.current) {
+      setEdit(initialAction === "create");
+      setId("");
+      setName("");
+      setError("");
+    }
+    wasOpen.current = open;
+  }, [open, initialAction]);
   const close = () => {
     setEdit(false);
     setError("");
@@ -32,7 +44,8 @@ export function SubjectManager({
       if (id) await studyRepository.renameSubject(id, name);
       else await studyRepository.createSubject(name);
       await refresh();
-      setEdit(false);
+      if (initialAction === "create") close();
+      else setEdit(false);
     } catch (error) {
       setError(
         error instanceof Error && /科目|文字/.test(error.message)

@@ -1,0 +1,74 @@
+/* TRACE Note / Ver.1 — source of truth for the notebook design system. */
+:root {
+  --background: #f7f4ec;
+  --foreground: #343630;
+  --accent: #777f66;
+  --muted: #b8b3a7;
+  --surface: #e8e4d9;
+  --primary: #626a54;
+  --primary-foreground: #f7f4ec;
+  --muted-foreground: #626658;
+  --border: #d2cdbf;
+  --control-border: #878b79;
+  --ring: #626a54;
+  --destructive: #914637;
+  --desk: #ede9df;
+  --field-background: #faf8f1;
+  --nav-background: rgb(247 244 236 / 0.96);
+  --pencil: #6c6b5e;
+  --pencil-light: #9b998b;
+  --pencil-rule: #b8b3a7;
+  --hatching: rgb(52 54 48 / 0.2);
+  --font-editorial:
+    "Iowan Old Style", "Baskerville", "Palatino Linotype", "Yu Mincho",
+    "Hiragino Mincho ProN", serif;
+  --font-numerals: "Baskerville", "Iowan Old Style", "Times New Roman", serif;
+  --font-reading: "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, sans-serif;
+  --text-micro: 0.625rem;
+  --text-caption: 0.6875rem;
+  --text-small: 0.75rem;
+  --text-label: 0.8125rem;
+  --text-body: 0.875rem;
+  --text-subhead: 0.9375rem;
+  --text-input: 1rem;
+  --text-section: 1.0625rem;
+  --text-lead: 1.1875rem;
+  --text-title-small: 1.5rem;
+  --text-title: 1.875rem;
+  --text-display: 2.25rem;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-section: 2rem;
+  --page-gutter: 1.5rem;
+  --tap-size: 44px;
+  --field-height: 46px;
+  --radius-control: 4px;
+  --radius-panel: 6px;
+  --radius-dialog: 8px;
+  --line-width: 1px;
+  --icon-stroke: 1.35;
+  --motion-duration: 180ms;
+  --motion-ease: cubic-bezier(0.2, 0.65, 0.3, 1);
+  --shadow-popup: 0 6px 24px rgb(52 54 48 / 0.08);
+  --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='grain'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.025' filter='url(%23grain)'/%3E%3C/svg%3E");
+  --rule-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='340' height='5' viewBox='0 0 340 5' preserveAspectRatio='none'%3E%3Cpath d='M0 2.2 36 1.7 78 2.5 121 1.8 164 2.1 216 1.5 263 2.1 304 1.8 340 2.3' fill='none' stroke='black' stroke-width='.85'/%3E%3Cpath d='m3 3.8 79-.8 91 .4 91-.8 73 .4' fill='none' stroke='black' stroke-width='.4' opacity='.5'/%3E%3C/svg%3E");
+}
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-muted: var(--surface);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --color-destructive: var(--destructive);
+  --font-sans: var(--font-reading);
+  --font-serif: var(--font-editorial);
+}
