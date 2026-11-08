@@ -29,6 +29,17 @@ export interface StudyRepository {
   getTheme(id: string): Promise<Theme | undefined>;
   createTheme(input: ThemeInput): Promise<Theme>;
   updateTheme(id: string, input: ThemeInput): Promise<Theme>;
+  updateThemeGoal(id: string, goal: string): Promise<Theme>;
+  moveItem(
+    themeId: string,
+    itemId: string,
+    direction: "up" | "down",
+  ): Promise<void>;
+  importRoadmap(
+    themeId: string,
+    source: string,
+    allowDuplicates?: boolean,
+  ): Promise<StudyItem[]>;
   deleteTheme(id: string): Promise<void>;
   listItems(themeId?: string): Promise<StudyItem[]>;
   createItem(themeId: string, title: string, goal?: string): Promise<StudyItem>;
