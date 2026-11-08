@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { PenLine, Lightbulb, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { latestCompletion } from "@/lib/model";
+import { latestOutput, outputLabel } from "@/lib/ratings";
+import { MasteryControl } from "./mastery-control";
 import {
   resolveTarget,
   roadmapHref,
@@ -44,7 +45,11 @@ export function LearningScreen({
       record.targetType === resolved.target.type &&
       record.targetId === resolved.target.id,
   );
-  const completion = latestCompletion(scoped, resolved.target);
+  const output = latestOutput(scoped, resolved.target);
+  const displayed =
+    feature === "output"
+      ? scoped.filter((record) => record.activity === "output")
+      : scoped;
   const title = feature === "output" ? "アウトプット" : "理解を深める";
   const Icon = feature === "output" ? PenLine : Lightbulb;
   return (
@@ -62,13 +67,18 @@ export function LearningScreen({
         </span>
         <h2>{resolved.name}</h2>
         {resolved.item?.goal && <p>{resolved.item.goal}</p>}
-        <div className="completion-summary">
-          <span>この対象の完成度</span>
-          <strong>
-            {completion === undefined ? "未設定" : `${completion}%`}
-          </strong>
-        </div>
+        {feature === "output" && (
+          <div className="completion-summary">
+            <span>直近のアウトプット</span>
+            <strong>{outputLabel(output?.outputRating)}</strong>
+          </div>
+        )}
       </section>
+      <MasteryControl
+        themeId={themeId}
+        target={resolved.target}
+        name={resolved.name}
+      />
       <p className="feature-notice">
         専用機能は準備中です。学習メモは記録できます。
       </p>
@@ -77,13 +87,11 @@ export function LearningScreen({
         学習を記録
       </Button>
       <section className="recent-section">
-        <h2>この対象の記録</h2>
-        {scoped.length ? (
-          <RecordList
-            records={scoped.slice(0, 5)}
-            themes={themes}
-            items={items}
-          />
+        <h2>
+          {feature === "output" ? "アウトプットの履歴" : "この対象の記録"}
+        </h2>
+        {displayed.length ? (
+          <RecordList records={displayed} themes={themes} items={items} />
         ) : (
           <p className="quiet-empty">まだ記録はありません。</p>
         )}

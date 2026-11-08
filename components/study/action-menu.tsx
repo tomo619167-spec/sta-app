@@ -6,12 +6,14 @@ export function ActionMenu({
   label,
   onEdit,
   onDelete,
+  onIcon,
   editLabel = "編集",
 }: {
   label: string;
   editLabel?: string;
   onEdit: () => void;
   onDelete?: () => void;
+  onIcon?: () => void;
 }) {
   return (
     <DropdownMenu.Root>
@@ -28,6 +30,11 @@ export function ActionMenu({
           collisionPadding={12}
         >
           <DropdownMenu.Item onSelect={onEdit}>{editLabel}</DropdownMenu.Item>
+          {onIcon && (
+            <DropdownMenu.Item onSelect={onIcon}>
+              アイコンを変更
+            </DropdownMenu.Item>
+          )}
           {onDelete && (
             <DropdownMenu.Item className="danger" onSelect={onDelete}>
               削除

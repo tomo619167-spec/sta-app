@@ -9,8 +9,17 @@ import {
   type ReactNode,
 } from "react";
 import { studyRepository } from "@/lib/storage";
-import type { Subject, StudyItem, StudyRecord, Theme } from "@/lib/model";
+import type {
+  MasteryChange,
+  Subject,
+  StudyItem,
+  StudyRecord,
+  Theme,
+} from "@/lib/model";
+import type { SubjectIconSetting } from "@/lib/subject-icons";
 interface StudyState {
+  subjectIcons: SubjectIconSetting[];
+  masteryHistory: MasteryChange[];
   themes: Theme[];
   subjects: Subject[];
   items: StudyItem[];
@@ -21,6 +30,8 @@ interface StudyState {
 }
 const Context = createContext<StudyState | null>(null);
 export function StudyProvider({ children }: { children: ReactNode }) {
+  const [subjectIcons, setSubjectIcons] = useState<SubjectIconSetting[]>([]);
+  const [masteryHistory, setMasteryHistory] = useState<MasteryChange[]>([]);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [items, setItems] = useState<StudyItem[]>([]);
   const [blocked, setBlocked] = useState(false);
@@ -32,13 +43,18 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
-      const [themes, records, subjects, items] = await Promise.all([
-        studyRepository.listThemes(),
-        studyRepository.listRecords(),
-        studyRepository.listSubjects(),
-        studyRepository.listItems(),
-      ]);
+      const [themes, records, subjects, items, icons, history] =
+        await Promise.all([
+          studyRepository.listThemes(),
+          studyRepository.listRecords(),
+          studyRepository.listSubjects(),
+          studyRepository.listItems(),
+          studyRepository.listSubjectIcons(),
+          studyRepository.listMasteryHistory(),
+        ]);
       if (request !== generation.current) return;
+      setSubjectIcons(icons);
+      setMasteryHistory(history);
       setSubjects(subjects);
       setItems(items);
       setBlocked(false);
@@ -72,6 +88,8 @@ export function StudyProvider({ children }: { children: ReactNode }) {
     <Context.Provider
       value={{
         themes,
+        subjectIcons,
+        masteryHistory,
         records,
         subjects,
         items,

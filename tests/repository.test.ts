@@ -1,4 +1,7 @@
 import "fake-indexeddb/auto";
+import type { FourLevel } from "../lib/model";
+import { inferSubjectIcon, type SubjectIconKey } from "../lib/subject-icons";
+import { latestMastery, latestOutput, masteryCounts } from "../lib/ratings";
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import { openDB } from "idb";
@@ -95,7 +98,7 @@ test("v1 migration retains every original field, records, roadmap and a byte-equ
     percent: 50,
   });
   await repo.close();
-  const db = await openDB(name, 3);
+  const db = await openDB(name);
   for (const original of others)
     assert.deepEqual(await db.get("legacy-themes-v1", original.id), original);
   db.close();
@@ -304,7 +307,7 @@ test("v2 upgrades preserve subjects, themes, mastery and original records with t
     [],
   );
   await repo.close();
-  const db = await openDB(name, 3);
+  const db = await openDB(name);
   assert.deepEqual(
     await db.get("legacy-records-v2", old.record.id),
     old.record,
@@ -447,4 +450,304 @@ test("deleting an item removes only its scoped records; goals validate without d
       target: { type: "item", id: first.id },
     }),
   );
+});
+
+async function seedV3(name: string) {
+  const old = await seedV2(name);
+  const db = await openDB(name, 3, {
+    upgrade(db, _old, _new, tx) {
+      tx.objectStore("records").createIndex("by-target", [
+        "targetType",
+        "targetId",
+      ]);
+      db.createObjectStore("legacy-records-v2", { keyPath: "id" }).createIndex(
+        "by-theme",
+        "themeId",
+      );
+    },
+  });
+  const tx = db.transaction(Array.from(db.objectStoreNames), "readwrite");
+  await tx
+    .objectStore("items")
+    .put({ ...old.item, goal: "消してはいけない目標" });
+  await tx
+    .objectStore("records")
+    .put({
+      ...old.record,
+      activity: "output",
+      targetType: "theme",
+      targetId: old.theme.id,
+      completion: 0,
+    });
+  await tx
+    .objectStore("records")
+    .add({
+      ...old.record,
+      id: "percent-100",
+      activity: "output",
+      targetType: "item",
+      targetId: old.item.id,
+      completion: 100,
+    });
+  await tx.objectStore("legacy-records-v2").add(old.record);
+  await tx.objectStore("legacy-themes-v1").add(legacy);
+  await tx.done;
+  const original: Record<string, unknown[]> = {};
+  for (const store of Array.from(db.objectStoreNames))
+    original[store] = await db.getAll(store);
+  db.close();
+  return { old, original };
+}
+test("v3 to v4 preserves every existing store byte-equivalently and never converts old percentages or mastery", async () => {
+  const name = crypto.randomUUID();
+  const { old, original } = await seedV3(name);
+  const repo = repository(name);
+  assert.equal((await repo.listSubjectIcons())[0].icon, "history");
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+  assert.deepEqual(
+    (await repo.listRecords())
+      .map((record) => record.completion)
+      .sort((a, b) => a! - b!),
+    [0, 100],
+  );
+  assert.ok(
+    (await repo.listRecords()).every(
+      (record) => record.outputRating === undefined,
+    ),
+  );
+  assert.equal(
+    latestMastery(await repo.listMasteryHistory(), {
+      type: "item",
+      id: old.item.id,
+    }),
+    undefined,
+  );
+  await repo.close();
+  const db = await openDB(name);
+  assert.equal(db.version, 4);
+  for (const [store, rows] of Object.entries(original))
+    assert.deepEqual(await db.getAll(store), rows);
+  db.close();
+  await repo.setSubjectIcon(old.subject.id, "chemistry");
+  await repo.close();
+  assert.equal((await repo.listSubjectIcons())[0].source, "manual");
+  assert.equal((await repo.listSubjectIcons())[0].icon, "chemistry");
+  assert.equal((await repo.listRecords()).length, 2);
+});
+test("a failed v4 icon migration rolls back the entire upgrade and can retry without duplication", async () => {
+  const name = crypto.randomUUID();
+  const { original } = await seedV3(name);
+  const add = IDBObjectStore.prototype.add;
+  IDBObjectStore.prototype.add = function (
+    ...args: Parameters<IDBObjectStore["add"]>
+  ) {
+    if (this.name === "subject-icons")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return add.apply(this, args);
+  };
+  const repo = repository(name);
+  try {
+    await assert.rejects(repo.listSubjects());
+  } finally {
+    IDBObjectStore.prototype.add = add;
+  }
+  const db = await openDB(name, 3);
+  assert.equal(db.version, 3);
+  assert.equal(db.objectStoreNames.contains("mastery-history"), false);
+  for (const [store, rows] of Object.entries(original))
+    assert.deepEqual(await db.getAll(store), rows);
+  db.close();
+  assert.equal((await repo.listSubjectIcons()).length, 1);
+  await repo.close();
+  assert.equal((await repo.listSubjectIcons()).length, 1);
+});
+test("subject keywords cover related names, normalize full-width text and fall back without APIs", () => {
+  const examples = {
+    math: ["数学Ⅰ", "線形代数", "微分積分", "確率統計"],
+    language: ["英語", "ＴＯＥＩＣ", "英文学"],
+    history: ["世界史", "日本史", "西洋史"],
+    physics: ["物理基礎", "量子力学"],
+    chemistry: ["有機化学"],
+    biology: ["生物基礎", "生命科学"],
+    economics: ["経済学", "ミクロ経済学"],
+    code: ["情報Ⅰ", "プログラミング"],
+    general: ["ゼミ", "", "未知の科目"],
+  };
+  for (const [icon, names] of Object.entries(examples))
+    for (const name of names) assert.equal(inferSubjectIcon(name), icon, name);
+});
+test("automatic icons follow renames while manual icons persist until automatic is explicitly restored", async () => {
+  const repo = repository();
+  const subject = await repo.createSubject("数学Ⅰ");
+  assert.equal((await repo.listSubjectIcons())[0].icon, "math");
+  await repo.renameSubject(subject.id, "英語");
+  assert.equal((await repo.listSubjectIcons())[0].icon, "language");
+  await repo.setSubjectIcon(subject.id, "biology");
+  await repo.renameSubject(subject.id, "世界史");
+  await repo.close();
+  assert.equal((await repo.listSubjectIcons())[0].icon, "biology");
+  assert.equal((await repo.listSubjectIcons())[0].source, "manual");
+  await repo.setSubjectIcon(subject.id, "auto");
+  assert.equal((await repo.listSubjectIcons())[0].icon, "history");
+  await assert.rejects(
+    repo.setSubjectIcon(subject.id, "invalid" as SubjectIconKey),
+  );
+  await assert.rejects(repo.setSubjectIcon("missing", "math"));
+  await assert.rejects(repo.createSubject(" 世界史 "));
+  assert.equal((await repo.listSubjectIcons()).length, 1);
+});
+test("four-level mastery is scoped, can decrease, retains every event and never follows output ratings", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const item = await repo.createItem(theme.id, "原因");
+  const themeTarget = { type: "theme" as const, id: theme.id };
+  const itemTarget = { type: "item" as const, id: item.id };
+  await repo.setMastery(theme.id, themeTarget, 2);
+  for (const level of [1, 2, 3, 4, 2] as const)
+    await repo.setMastery(theme.id, itemTarget, level);
+  const history = await repo.listMasteryHistory(theme.id);
+  assert.equal(history.length, 6);
+  assert.equal(latestMastery(history, itemTarget), 2);
+  assert.equal(latestMastery(history, themeTarget), 2);
+  assert.ok(
+    history.every((event) => !Number.isNaN(Date.parse(event.changedAt))),
+  );
+  await repo.addRecord(theme.id, "十分できたアウトプット", {
+    target: itemTarget,
+    activity: "output",
+    outputRating: 4,
+  });
+  await repo.addRecord(theme.id, "未評価のアウトプット", {
+    target: themeTarget,
+    activity: "output",
+  });
+  assert.deepEqual(await repo.listMasteryHistory(), history);
+  assert.equal(
+    (await repo.listRecords()).find((record) => record.targetType === "item")!
+      .outputRating,
+    4,
+  );
+  assert.equal(
+    (await repo.listRecords()).find((record) => record.targetType === "theme")!
+      .outputRating,
+    undefined,
+  );
+  assert.equal((await repo.listItems())[0].completed, false);
+  assert.deepEqual(masteryCounts(await repo.listItems(), history), {
+    1: 0,
+    2: 1,
+    3: 0,
+    4: 0,
+    unrated: 0,
+    total: 1,
+  });
+  await repo.close();
+  assert.equal(latestMastery(await repo.listMasteryHistory(), itemTarget), 2);
+});
+test("unrated output sessions remain unrated and do not inherit a previous session or change mastery", async () => {
+  const name = crypto.randomUUID();
+  const repo = repository(name);
+  const subject = await repo.createSubject("世界史");
+  const theme = await repo.createTheme({
+    name: "革命",
+    subjectId: subject.id,
+    description: "",
+  });
+  const target = { type: "theme" as const, id: theme.id };
+  for (const level of [1, 2, 3, 4] as const)
+    await repo.addRecord(theme.id, `評価${level}`, {
+      activity: "output",
+      outputRating: level,
+    });
+  // Distinct fixture times make the latest-session policy independent of CPU speed.
+  const db = await openDB(name);
+  const records = await db.getAll("records");
+  for (const record of records)
+    await db.put("records", {
+      ...record,
+      studiedAt: "2026-01-01T00:00:00.000Z",
+    });
+  db.close();
+  await repo.addRecord(theme.id, "未評価", { activity: "output" });
+  assert.equal(
+    latestOutput(await repo.listRecords(), target)?.outputRating,
+    undefined,
+  );
+  assert.equal((await repo.listRecords()).length, 5);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+});
+test("invalid ratings and foreign or deleted targets cannot create mastery events or output records", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const other = await repo.createTheme({ ...input, name: "別テーマ" });
+  const item = await repo.createItem(theme.id, "原因");
+  for (const level of [0, 5, NaN, Infinity, 1.5]) {
+    await assert.rejects(
+      repo.setMastery(
+        theme.id,
+        { type: "item", id: item.id },
+        level as FourLevel,
+      ),
+    );
+    await assert.rejects(
+      repo.addRecord(theme.id, "不正値", {
+        activity: "output",
+        outputRating: level as FourLevel,
+      }),
+    );
+  }
+  await assert.rejects(
+    repo.setMastery(other.id, { type: "item", id: item.id }, 3),
+  );
+  await assert.rejects(
+    repo.setMastery(theme.id, { type: "theme", id: other.id }, 3),
+  );
+  await assert.rejects(
+    repo.setMastery(theme.id, { type: "item", id: "missing" }, 3),
+  );
+  await assert.rejects(
+    repo.addRecord(theme.id, "違う評価", {
+      activity: "deepen",
+      outputRating: 3,
+    }),
+  );
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+  assert.deepEqual(await repo.listRecords(), []);
+});
+test("mastery history deletion is scoped to its parent and failed writes retain the previous level", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const other = await repo.createTheme({ ...input, name: "別テーマ" });
+  const item = await repo.createItem(theme.id, "原因");
+  await repo.setMastery(theme.id, { type: "item", id: item.id }, 4);
+  await repo.setMastery(theme.id, { type: "theme", id: theme.id }, 2);
+  await repo.setMastery(other.id, { type: "theme", id: other.id }, 3);
+  const add = IDBObjectStore.prototype.add;
+  IDBObjectStore.prototype.add = function (
+    ...args: Parameters<IDBObjectStore["add"]>
+  ) {
+    if (this.name === "mastery-history")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return add.apply(this, args);
+  };
+  try {
+    await assert.rejects(
+      repo.setMastery(theme.id, { type: "item", id: item.id }, 1),
+    );
+  } finally {
+    IDBObjectStore.prototype.add = add;
+  }
+  assert.equal(
+    latestMastery(await repo.listMasteryHistory(), {
+      type: "item",
+      id: item.id,
+    }),
+    4,
+  );
+  await repo.deleteItem(item.id);
+  assert.equal((await repo.listMasteryHistory()).length, 2);
+  await repo.deleteTheme(theme.id);
+  const remaining = await repo.listMasteryHistory();
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].themeId, other.id);
 });

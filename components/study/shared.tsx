@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { ArrowUpRight, BookOpen, ArrowLeft } from "lucide-react";
-import {
-  dateLabel,
-  progress,
-  type StudyItem,
-  type StudyRecord,
-} from "@/lib/model";
+import { dateLabel, type StudyItem, type StudyRecord } from "@/lib/model";
+import { masteryCounts, outputLabel } from "@/lib/ratings";
+import type { MasteryChange } from "@/lib/model";
+import { MasterySegments } from "./mastery-segments";
 import { Button } from "@/components/ui/button";
 export function BackLink({
   href = "/",
@@ -24,35 +22,14 @@ export function BackLink({
 export function Progress({
   items,
   label,
+  history,
 }: {
   items: StudyItem[];
   label: string;
+  history: MasteryChange[];
 }) {
-  const value = progress(items);
   return (
-    <div className="theme-progress">
-      <div className="progress-label">
-        <span>
-          {value.total
-            ? `習得済み ${value.completed} / ${value.total} 項目`
-            : "学習項目なし"}
-        </span>
-        <span className="progress-number">
-          {value.percent}
-          <small>%</small>
-        </span>
-      </div>
-      <div
-        className="progress-track"
-        role="progressbar"
-        aria-label={`${label}の学習進捗`}
-        aria-valuenow={value.percent}
-        aria-valuemin={0}
-        aria-valuemax={100}
-      >
-        <span style={{ width: `${value.percent}%` }} />
-      </div>
-    </div>
+    <MasterySegments counts={masteryCounts(items, history)} label={label} />
   );
 }
 export function EmptyThemes({ onCreate }: { onCreate: () => void }) {
@@ -100,8 +77,15 @@ export function RecordList({
                     ? `項目 · ${items.find((item) => item.id === record.targetId)?.title ?? "削除済みの項目"}`
                     : "テーマ全体"}
                 </span>
+                {record.activity === "output" && (
+                  <span>
+                    アウトプット完成度 · {outputLabel(record.outputRating)}
+                  </span>
+                )}
                 {record.completion !== undefined && (
-                  <span>完成度 {record.completion}%</span>
+                  <span className="legacy-rating">
+                    旧評価 {record.completion}%
+                  </span>
                 )}
               </div>
               <p>{record.note}</p>

@@ -21,6 +21,7 @@ import { RecordForm } from "./record-form";
 import { ActionMenu } from "./action-menu";
 import { DailyActions } from "./daily-actions";
 import { LearningScreen } from "./learning-screen";
+import { MasteryControl } from "./mastery-control";
 import { RoadmapItems } from "./roadmap-items";
 import { SubjectExamsScreen } from "./subject-exams";
 export function MissingTheme() {
@@ -38,7 +39,8 @@ export function MissingTheme() {
   );
 }
 export function DetailScreen({ id }: { id: string }) {
-  const { themes, subjects, items, records, refresh } = useStudy();
+  const { themes, subjects, items, records, masteryHistory, refresh } =
+    useStudy();
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
@@ -91,6 +93,11 @@ export function DetailScreen({ id }: { id: string }) {
           </div>
         )}
       </header>
+      <MasteryControl
+        themeId={id}
+        target={{ type: "theme", id }}
+        name={theme.name}
+      />
       <Link
         href={roadmapHref(id)}
         className="roadmap-entry"
@@ -100,7 +107,11 @@ export function DetailScreen({ id }: { id: string }) {
           <h2>ロードマップ</h2>
           <ChevronRight size={18} />
         </div>
-        <Progress items={themeItems} label={theme.name} />
+        <Progress
+          items={themeItems}
+          label={theme.name}
+          history={masteryHistory}
+        />
       </Link>
       <section className="daily-section">
         <div className="section-heading">
@@ -200,7 +211,7 @@ function RoadmapScreen({
   themeId: string;
   itemId?: string;
 }) {
-  const { themes, items } = useStudy();
+  const { themes, items, masteryHistory } = useStudy();
   const theme = themes.find((theme) => theme.id === themeId);
   if (!theme) return <MissingTheme />;
   return (
@@ -209,23 +220,10 @@ function RoadmapScreen({
       <header className="roadmap-heading">
         <h1>ロードマップ</h1>
         <p>{theme.name}</p>
-        <div className="state-legend" aria-label="学習状態の凡例">
-          <span>
-            <i className="legend-marker not-started" />
-            未学習
-          </span>
-          <span>
-            <i className="legend-marker in-progress" />
-            学習中
-          </span>
-          <span>
-            <i className="legend-marker mastered" />
-            習得済み
-          </span>
-        </div>
         <Progress
           items={items.filter((item) => item.themeId === themeId)}
           label={theme.name}
+          history={masteryHistory}
         />
       </header>
       <RoadmapItems

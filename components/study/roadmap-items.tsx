@@ -3,7 +3,8 @@ import { useState } from "react";
 import { Accordion } from "radix-ui";
 import { Plus, ChevronDown } from "lucide-react";
 import type { StudyItem } from "@/lib/model";
-import { getLearningState, learningStateLabels } from "@/lib/study-summary";
+import { latestMastery, masteryLabel } from "@/lib/ratings";
+import { MasteryControl } from "./mastery-control";
 import { studyRepository } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,12 +24,7 @@ export function RoadmapItems({
   themeId: string;
   initialItemId?: string;
 }) {
-  const { items, records, refresh } = useStudy();
-  const recordedItemIds = new Set(
-    records
-      .filter((record) => record.targetType === "item")
-      .map((record) => record.targetId),
-  );
+  const { items, masteryHistory, refresh } = useStudy();
   const themeItems = items.filter((item) => item.themeId === themeId);
   const [expanded, setExpanded] = useState<string[]>(
     initialItemId ? [initialItemId] : [],
@@ -37,29 +33,7 @@ export function RoadmapItems({
   const [editing, setEditing] = useState<StudyItem>();
   const [deleting, setDeleting] = useState<StudyItem>();
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<{
-    id: string;
-    completed: boolean;
-  } | null>(null);
   const [error, setError] = useState("");
-  async function toggle(item: StudyItem) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    setPending({ id: item.id, completed: !item.completed });
-    try {
-      await studyRepository.updateItem(item.id, {
-        title: item.title,
-        completed: !item.completed,
-      });
-      await refresh();
-    } catch {
-      setError("保存できませんでした。再試行してください。");
-    } finally {
-      setPending(null);
-      setBusy(false);
-    }
-  }
   async function remove() {
     if (busy || !deleting) return;
     setBusy(true);
@@ -100,12 +74,11 @@ export function RoadmapItems({
           className="roadmap-items"
         >
           {themeItems.map((item) => {
-            const completed =
-              pending?.id === item.id ? pending.completed : item.completed;
-            const state = getLearningState(
-              { ...item, completed },
-              recordedItemIds,
-            );
+            const level = latestMastery(masteryHistory, {
+              type: "item",
+              id: item.id,
+            });
+            const state = level === undefined ? "unrated" : String(level);
             return (
               <Accordion.Item
                 value={item.id}
@@ -120,14 +93,15 @@ export function RoadmapItems({
                       aria-describedby={`learning-state-${item.id}`}
                     >
                       <span
-                        className={`mastery-dot ${state}`}
+                        className="mastery-dot"
+                        data-level={state}
                         aria-hidden="true"
                       />
                       <span>{item.title}</span>
                       <ChevronDown size={17} />
                     </Accordion.Trigger>
                     <span className="sr-only" id={`learning-state-${item.id}`}>
-                      {learningStateLabels[state]}
+                      {masteryLabel(level)}
                     </span>
                   </Accordion.Header>
                   <ActionMenu
@@ -148,16 +122,14 @@ export function RoadmapItems({
                       <dt>到達目標</dt>
                       <dd>{item.goal || "未設定"}</dd>
                     </dl>
-                    <label className="item-check">
-                      <input
-                        type="checkbox"
-                        checked={completed}
-                        onChange={() => void toggle(item)}
-                        disabled={busy}
-                      />
-                      <span>{completed ? "習得済み" : "習得済みにする"}</span>
-                      <span className="sr-only">{item.title}</span>
-                    </label>
+                    {item.completed && (
+                      <span className="legacy-rating">旧版：習得済み</span>
+                    )}
+                    <MasteryControl
+                      themeId={themeId}
+                      target={{ type: "item", id: item.id }}
+                      name={item.title}
+                    />
                     <DailyActions themeId={themeId} itemId={item.id} />
                   </div>
                 </Accordion.Content>
