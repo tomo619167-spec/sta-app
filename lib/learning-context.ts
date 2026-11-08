@@ -4,8 +4,9 @@ export function learningHref(
   themeId: string,
   feature: DailyFeature,
   itemId?: string,
+  fromTheme = false,
 ) {
-  return `/themes/${encodeURIComponent(themeId)}/${feature}${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}`}`;
+  return `/themes/${encodeURIComponent(themeId)}/${feature}${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}${fromTheme ? "&from=theme" : ""}`}`;
 }
 export function resolveTarget(
   theme: Theme,
@@ -34,4 +35,8 @@ export function roadmapHref(themeId: string, itemId?: string) {
 }
 export function examHref(subjectId: string, themeId?: string) {
   return `/subjects/${encodeURIComponent(subjectId)}/past-exams${themeId === undefined ? "" : `?theme=${encodeURIComponent(themeId)}`}`;
+}
+
+export function themeHref(themeId: string, itemId?: string) {
+  return `/themes/${encodeURIComponent(themeId)}${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}`}`;
 }

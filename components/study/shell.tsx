@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  ArrowLeft,
   BookOpen,
   House,
   History,
@@ -18,6 +19,7 @@ import {
 } from "@/components/trace/pencil-art";
 export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
+  const isThemeDetail = /^\/themes\/[^/]+\/?$/.test(path);
   const { loading, error, refresh } = useStudy();
   const links = [
     { href: "/", label: "ホーム", icon: House },
@@ -30,11 +32,23 @@ export function Shell({ children }: { children: React.ReactNode }) {
       <a className="skip-link" href="#main">
         本文へスキップ
       </a>
-      <header className="site-header">
+      <header
+        className={cn("site-header", isThemeDetail && "theme-site-header")}
+      >
+        {isThemeDetail && (
+          <Link href="/" className="header-back" aria-label="科目一覧に戻る">
+            <ArrowLeft size={19} />
+          </Link>
+        )}
         <Link href="/" className="brand" aria-label="TRACE Note ホーム">
           <TraceWordmark />
         </Link>
-        <span className="storage-label">
+        <span
+          className={cn(
+            "storage-label",
+            isThemeDetail && "theme-storage-label",
+          )}
+        >
           <HardDrive size={13} strokeWidth={1.5} /> この端末に保存
         </span>
       </header>

@@ -21,7 +21,9 @@ import { RecordForm } from "./record-form";
 import { ActionMenu } from "./action-menu";
 import { DailyActions } from "./daily-actions";
 import { LearningScreen } from "./learning-screen";
-import { MasteryControl } from "./mastery-control";
+import { latestMastery, masteryCounts } from "@/lib/ratings";
+import { MasteryBadge } from "./mastery-badge";
+import { MasteryEditor } from "./mastery-control";
 import { RoadmapItems } from "./roadmap-items";
 import { SubjectExamsScreen } from "./subject-exams";
 export function MissingTheme() {
@@ -38,11 +40,18 @@ export function MissingTheme() {
     </>
   );
 }
-export function DetailScreen({ id }: { id: string }) {
+export function DetailScreen({
+  id,
+  initialItemId,
+}: {
+  id: string;
+  initialItemId?: string;
+}) {
   const { themes, subjects, items, records, masteryHistory, refresh } =
     useStudy();
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
+  const [masteryOpen, setMasteryOpen] = useState(false);
   const [recordOpen, setRecordOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -51,6 +60,8 @@ export function DetailScreen({ id }: { id: string }) {
   if (!theme) return <MissingTheme />;
   const subject = subjects.find((subject) => subject.id === theme.subjectId);
   const themeItems = items.filter((item) => item.themeId === id);
+  const counts = masteryCounts(themeItems, masteryHistory);
+  const level = latestMastery(masteryHistory, { type: "theme", id });
   const recent = records.filter((record) => record.themeId === id).slice(0, 3);
   async function remove() {
     if (busy) return;
@@ -68,8 +79,7 @@ export function DetailScreen({ id }: { id: string }) {
     }
   }
   return (
-    <>
-      <BackLink />
+    <div className="theme-learning-page">
       <header className="detail-intro">
         <div className="detail-topline">
           <span className="subject-label">
@@ -78,6 +88,7 @@ export function DetailScreen({ id }: { id: string }) {
           <ActionMenu
             label="テーマのメニュー"
             onEdit={() => setEditOpen(true)}
+            onMastery={() => setMasteryOpen(true)}
             onDelete={() => {
               setError("");
               setDeleteOpen(true);
@@ -86,42 +97,43 @@ export function DetailScreen({ id }: { id: string }) {
         </div>
         <h1 className="theme-title">{theme.name}</h1>
         <PencilUnderline />
+        <MasteryBadge level={level} label="テーマ全体の習得度" />
         {theme.description && (
-          <div className="theme-objective">
-            <span>学習目標</span>
+          <details className="theme-goal-disclosure">
+            <summary>学習目標</summary>
             <p className="detail-description">{theme.description}</p>
-          </div>
+          </details>
         )}
       </header>
-      <MasteryControl
-        themeId={id}
-        target={{ type: "theme", id }}
-        name={theme.name}
-      />
       <Link
         href={roadmapHref(id)}
-        className="roadmap-entry"
+        className="compact-roadmap-entry"
         aria-label="ロードマップを見る"
+        aria-describedby="theme-progress-count"
       >
-        <div className="section-heading">
-          <h2>ロードマップ</h2>
-          <ChevronRight size={18} />
-        </div>
-        <Progress
-          items={themeItems}
-          label={theme.name}
-          history={masteryHistory}
-        />
+        <span id="theme-progress-count">
+          説明できる以上{" "}
+          <strong>
+            {counts[3] + counts[4]} / {counts.total}
+          </strong>{" "}
+          項目
+        </span>
+        <ChevronRight size={17} />
       </Link>
+      <RoadmapItems
+        key={`${id}:${initialItemId ?? ""}`}
+        themeId={id}
+        initialItemId={initialItemId}
+        preview
+      />
       <section className="daily-section">
         <div className="section-heading">
-          <h2>日常学習</h2>
-          <span className="section-scope">テーマ全体</span>
+          <h2>テーマ全体を学ぶ</h2>
         </div>
         <DailyActions themeId={id} />
       </section>
       <section className="exam-section">
-        <h2>過去問</h2>
+        <h2>過去問・演習</h2>
         <Button asChild variant="outline" className="exam-entry">
           <Link href={examHref(theme.subjectId, id)}>
             <BookOpen />
@@ -163,6 +175,13 @@ export function DetailScreen({ id }: { id: string }) {
           <p className="quiet-empty">まだ記録はありません。</p>
         )}
       </section>
+      <MasteryEditor
+        themeId={id}
+        target={{ type: "theme", id }}
+        name={theme.name}
+        open={masteryOpen}
+        onClose={() => setMasteryOpen(false)}
+      />
       <ThemeForm theme={theme} open={editOpen} onOpenChange={setEditOpen} />
       <RecordForm themeId={id} open={recordOpen} onOpenChange={setRecordOpen} />
       <Dialog
@@ -201,7 +220,7 @@ export function DetailScreen({ id }: { id: string }) {
           </div>
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }
 function RoadmapScreen({
@@ -238,10 +257,12 @@ export function FeatureScreen({
   id,
   slug,
   itemId,
+  fromTheme = false,
 }: {
   id: string;
   slug: string;
   itemId?: string;
+  fromTheme?: boolean;
 }) {
   const { themes } = useStudy();
   const theme = themes.find((theme) => theme.id === id);
@@ -253,6 +274,7 @@ export function FeatureScreen({
         themeId={id}
         feature={slug}
         itemId={itemId}
+        fromTheme={fromTheme}
       />
     );
   if (slug === "roadmap") return <RoadmapScreen themeId={id} itemId={itemId} />;

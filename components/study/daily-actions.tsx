@@ -5,9 +5,11 @@ import { learningHref } from "@/lib/learning-context";
 export function DailyActions({
   themeId,
   itemId,
+  fromTheme = false,
 }: {
   themeId: string;
   itemId?: string;
+  fromTheme?: boolean;
 }) {
   return (
     <nav
@@ -15,13 +17,13 @@ export function DailyActions({
       aria-label={itemId === undefined ? "テーマ全体の学習" : "項目の学習"}
     >
       <Button asChild variant="outline">
-        <Link href={learningHref(themeId, "output", itemId)}>
+        <Link href={learningHref(themeId, "output", itemId, fromTheme)}>
           <PenLine />
           <span>アウトプット</span>
         </Link>
       </Button>
       <Button asChild variant="outline">
-        <Link href={learningHref(themeId, "deepen", itemId)}>
+        <Link href={learningHref(themeId, "deepen", itemId, fromTheme)}>
           <Lightbulb />
           <span>理解を深める</span>
         </Link>

@@ -7,6 +7,7 @@ export function ActionMenu({
   onEdit,
   onDelete,
   onIcon,
+  onMastery,
   editLabel = "編集",
 }: {
   label: string;
@@ -14,6 +15,7 @@ export function ActionMenu({
   onEdit: () => void;
   onDelete?: () => void;
   onIcon?: () => void;
+  onMastery?: () => void;
 }) {
   return (
     <DropdownMenu.Root>
@@ -30,6 +32,11 @@ export function ActionMenu({
           collisionPadding={12}
         >
           <DropdownMenu.Item onSelect={onEdit}>{editLabel}</DropdownMenu.Item>
+          {onMastery && (
+            <DropdownMenu.Item onSelect={onMastery}>
+              習得度を変更
+            </DropdownMenu.Item>
+          )}
           {onIcon && (
             <DropdownMenu.Item onSelect={onIcon}>
               アイコンを変更
