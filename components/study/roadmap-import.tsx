@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Theme } from "@/lib/model";
 import {
   assertRoadmapContext,
@@ -7,60 +7,68 @@ import {
   parseRoadmapJSON,
   roadmapExample,
   ROADMAP_MAX_JSON_LENGTH,
-  type RoadmapDocument,
 } from "@/lib/roadmap-json";
 import { studyRepository } from "@/lib/storage";
-import { EditorDialog } from "./editor-dialog";
 import { useStudy } from "./provider";
-export function RoadmapImport({
+export function useRoadmapImport({
   theme,
   subject,
-  open,
-  onClose,
+  source,
+  preview,
+  onPreview,
+  beforeImport,
   onImported,
 }: {
   theme: Theme;
   subject: string;
-  open: boolean;
-  onClose: () => void;
+  source: string;
+  preview: boolean;
+  onPreview: () => void;
+  beforeImport: () => Promise<void>;
   onImported: (count: number) => void;
 }) {
   const { items, refresh } = useStudy();
-  const [source, setSource] = useState("");
-  const [document, setDocument] = useState<RoadmapDocument>();
   const [allowDuplicates, setAllowDuplicates] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
-  const wasOpen = useRef(false);
   useEffect(() => {
-    if (open && !wasOpen.current) {
-      setSource("");
-      setDocument(undefined);
-      setAllowDuplicates(false);
-      setError("");
+    setAllowDuplicates(false);
+    setError("");
+  }, [source, preview]);
+  const checked = useMemo(() => {
+    if (!preview) return {};
+    try {
+      const document = parseRoadmapJSON(source);
+      assertRoadmapContext(document, subject, theme.name);
+      return { document };
+    } catch (error) {
+      return { error: (error as Error).message };
     }
-    wasOpen.current = open;
-  }, [open]);
+  }, [source, preview, subject, theme.name]);
+  const document = checked.document;
   const duplicates = document
     ? findRoadmapDuplicates(
         document.items,
         items.filter((item) => item.themeId === theme.id),
       )
     : [];
-  async function submit(event: FormEvent) {
-    event.preventDefault();
+  async function submit() {
     if (lock.current) return;
     setError("");
-    if (!document) {
+    if (!preview) {
       try {
         const parsed = parseRoadmapJSON(source);
         assertRoadmapContext(parsed, subject, theme.name);
-        setDocument(parsed);
         setAllowDuplicates(false);
+        onPreview();
       } catch (error) {
         setError((error as Error).message);
       }
+      return;
+    }
+    if (!document) {
+      setError(checked.error ?? "JSONを確認してください。");
       return;
     }
     if (duplicates.length && !allowDuplicates) {
@@ -72,6 +80,7 @@ export function RoadmapImport({
     lock.current = true;
     setBusy(true);
     try {
+      await beforeImport();
       const added = await studyRepository.importRoadmap(
         theme.id,
         source,
@@ -79,7 +88,6 @@ export function RoadmapImport({
       );
       await refresh();
       onImported(added.length);
-      onClose();
     } catch (error) {
       setError(
         error instanceof Error &&
@@ -95,25 +103,33 @@ export function RoadmapImport({
       setBusy(false);
     }
   }
+  return {
+    document,
+    duplicates,
+    allowDuplicates,
+    setAllowDuplicates,
+    busy,
+    error: error || checked.error || "",
+    submit,
+  };
+}
+export function RoadmapImport({
+  theme,
+  subject,
+  source,
+  onSourceChange,
+  importer,
+}: {
+  theme: Theme;
+  subject: string;
+  source: string;
+  onSourceChange: (value: string) => void;
+  importer: ReturnType<typeof useRoadmapImport>;
+}) {
+  const { document, duplicates, allowDuplicates, setAllowDuplicates, busy } =
+    importer;
   return (
-    <EditorDialog
-      open={open}
-      onClose={onClose}
-      title={document ? "取り込む項目を確認" : "JSONを取り込む"}
-      onSubmit={submit}
-      saveLabel={document ? "項目を追加する" : "プレビュー"}
-      busy={busy}
-      error={error}
-      onBack={
-        document
-          ? () => {
-              setDocument(undefined);
-              setAllowDuplicates(false);
-              setError("");
-            }
-          : undefined
-      }
-    >
+    <fieldset className="workflow-fields" disabled={busy}>
       {document ? (
         <>
           <div className="target-summary">
@@ -171,7 +187,7 @@ export function RoadmapImport({
               rows={12}
               maxLength={ROADMAP_MAX_JSON_LENGTH}
               value={source}
-              onChange={(event) => setSource(event.target.value)}
+              onChange={(event) => onSourceChange(event.target.value)}
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
@@ -186,6 +202,6 @@ export function RoadmapImport({
           </details>
         </>
       )}
-    </EditorDialog>
+    </fieldset>
   );
 }

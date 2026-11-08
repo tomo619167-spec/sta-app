@@ -1,3 +1,4 @@
+import { newRoadmapDraft, validateRoadmapDraft } from "../lib/roadmap-draft";
 import "fake-indexeddb/auto";
 import {
   buildRoadmapPrompt,
@@ -501,7 +502,7 @@ async function seedV3(name: string) {
   db.close();
   return { old, original };
 }
-test("v3 to v4 preserves every existing store byte-equivalently and never converts old percentages or mastery", async () => {
+test("v3 to v5 preserves every existing store byte-equivalently and never converts old percentages or mastery", async () => {
   const name = crypto.randomUUID();
   const { old, original } = await seedV3(name);
   const repo = repository(name);
@@ -527,7 +528,7 @@ test("v3 to v4 preserves every existing store byte-equivalently and never conver
   );
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 4);
+  assert.equal(db.version, 5);
   for (const [store, rows] of Object.entries(original))
     assert.deepEqual(await db.getAll(store), rows);
   db.close();
@@ -1102,4 +1103,172 @@ test("imports recheck context and duplicates at commit time including concurrent
   assert.deepEqual(await repo.listItems(), before);
   await repo.deleteTheme(theme.id);
   await assert.rejects(repo.importRoadmap(theme.id, source), /テーマ/);
+});
+
+async function seedV4(name: string) {
+  const { old } = await seedV3(name);
+  const db = await openDB(name, 4, {
+    upgrade(db) {
+      db.createObjectStore("subject-icons", { keyPath: "subjectId" });
+      const history = db.createObjectStore("mastery-history", {
+        autoIncrement: true,
+      });
+      history.createIndex("by-theme", "themeId");
+      history.createIndex("by-target", ["targetType", "targetId"]);
+    },
+  });
+  await db.put("subject-icons", {
+    subjectId: old.subject.id,
+    icon: "physics",
+    source: "manual",
+    updatedAt: "2026-11-01",
+  });
+  await db.add("mastery-history", {
+    themeId: old.theme.id,
+    targetType: "item",
+    targetId: old.item.id,
+    level: 3,
+    changedAt: "2026-11-01",
+  });
+  const rows: Record<string, unknown[]> = {};
+  for (const store of Array.from(db.objectStoreNames))
+    rows[store] = await db.getAll(store);
+  db.close();
+  return { old, rows };
+}
+test("v4 to v5 adds only an empty draft store and preserves all eight stores, manual icons and ratings", async () => {
+  const name = crypto.randomUUID();
+  const { old, rows } = await seedV4(name);
+  const repo = repository(name);
+  assert.equal(await repo.getRoadmapDraft(old.theme.id), undefined);
+  await repo.close();
+  const db = await openDB(name);
+  assert.equal(db.version, 5);
+  assert.equal(db.objectStoreNames.length, 9);
+  for (const [store, values] of Object.entries(rows))
+    assert.deepEqual(await db.getAll(store), values);
+  assert.deepEqual(await db.getAll("roadmap-drafts"), []);
+  db.close();
+});
+test("failed v5 draft-store creation rolls back to v4 and retries safely", async () => {
+  const name = crypto.randomUUID();
+  const { rows } = await seedV4(name);
+  const create = IDBDatabase.prototype.createObjectStore;
+  IDBDatabase.prototype.createObjectStore = function (
+    ...args: Parameters<IDBDatabase["createObjectStore"]>
+  ) {
+    if (args[0] === "roadmap-drafts")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return create.apply(this, args);
+  };
+  const repo = repository(name);
+  try {
+    await assert.rejects(repo.listThemes());
+  } finally {
+    IDBDatabase.prototype.createObjectStore = create;
+  }
+  const db = await openDB(name);
+  assert.equal(db.version, 4);
+  assert.equal(db.objectStoreNames.contains("roadmap-drafts"), false);
+  for (const [store, values] of Object.entries(rows))
+    assert.deepEqual(await db.getAll(store), values);
+  db.close();
+  assert.ok((await repo.listThemes()).length);
+  await repo.close();
+  const upgraded = await openDB(name);
+  assert.equal(upgraded.version, 5);
+  upgraded.close();
+});
+test("versioned drafts retain unfinished inputs and step separately per theme and disappear with their theme", async () => {
+  const { repo, input } = await setup();
+  const a = await repo.createTheme(input);
+  const b = await repo.createTheme({ ...input, name: "革命後" });
+  const first = {
+    ...newRoadmapDraft(a),
+    active: true,
+    step: "json" as const,
+    goal: "下書きの目標",
+    level: "university" as const,
+    notes: "補足",
+    prompt: "コピー済みプロンプト",
+    copied: true,
+    source: "{ unfinished",
+  };
+  const second = { ...newRoadmapDraft(b), active: false, notes: "別テーマ" };
+  await repo.saveRoadmapDraft(first);
+  await repo.saveRoadmapDraft(second);
+  await repo.close();
+  assert.deepEqual(await repo.getRoadmapDraft(a.id), first);
+  assert.deepEqual(await repo.getRoadmapDraft(b.id), second);
+  assert.deepEqual(await repo.listItems(), []);
+  assert.equal((await repo.getTheme(a.id))?.description, input.description);
+  assert.throws(() => validateRoadmapDraft({ ...first, version: 2 } as never));
+  await assert.rejects(
+    repo.saveRoadmapDraft({ ...first, source: "a".repeat(100001) }),
+  );
+  assert.deepEqual(await repo.getRoadmapDraft(a.id), first);
+  await repo.deleteTheme(a.id);
+  assert.equal(await repo.getRoadmapDraft(a.id), undefined);
+  await assert.rejects(repo.saveRoadmapDraft(first), /テーマ/);
+  assert.deepEqual(await repo.getRoadmapDraft(b.id), second);
+});
+test("successful import removes only its draft atomically; invalid JSON and aborted batches preserve drafts and old items", async () => {
+  const { repo, input } = await setup();
+  const theme = await repo.createTheme(input);
+  const other = await repo.createTheme({ ...input, name: "別テーマ" });
+  const item = await repo.createItem(theme.id, "残す項目", "既存の目標");
+  const source = roadmapSource([
+    { title: "新規A", goal: "目標A" },
+    { title: "新規B", goal: "目標B" },
+  ]);
+  const draft = {
+    ...newRoadmapDraft(theme),
+    active: true,
+    step: "preview" as const,
+    source,
+  };
+  const otherDraft = newRoadmapDraft(other);
+  await repo.saveRoadmapDraft(draft);
+  await repo.saveRoadmapDraft(otherDraft);
+  await assert.rejects(repo.importRoadmap(theme.id, "{"));
+  assert.deepEqual(await repo.getRoadmapDraft(theme.id), draft);
+  const add = IDBObjectStore.prototype.add;
+  let writes = 0;
+  IDBObjectStore.prototype.add = function (
+    ...args: Parameters<IDBObjectStore["add"]>
+  ) {
+    if (this.name === "items" && ++writes === 2)
+      throw new DOMException("Quota", "QuotaExceededError");
+    return add.apply(this, args);
+  };
+  try {
+    await assert.rejects(repo.importRoadmap(theme.id, source));
+  } finally {
+    IDBObjectStore.prototype.add = add;
+  }
+  assert.deepEqual(await repo.listItems(theme.id), [item]);
+  assert.deepEqual(await repo.getRoadmapDraft(theme.id), draft);
+  const del = IDBObjectStore.prototype.delete;
+  IDBObjectStore.prototype.delete = function (
+    ...args: Parameters<IDBObjectStore["delete"]>
+  ) {
+    if (this.name === "roadmap-drafts")
+      throw new DOMException("Quota", "QuotaExceededError");
+    return del.apply(this, args);
+  };
+  try {
+    await assert.rejects(repo.importRoadmap(theme.id, source));
+  } finally {
+    IDBObjectStore.prototype.delete = del;
+  }
+  assert.deepEqual(await repo.listItems(theme.id), [item]);
+  assert.deepEqual(await repo.getRoadmapDraft(theme.id), draft);
+  await repo.importRoadmap(theme.id, source);
+  await repo.close();
+  assert.equal(await repo.getRoadmapDraft(theme.id), undefined);
+  assert.deepEqual(await repo.getRoadmapDraft(other.id), otherDraft);
+  assert.deepEqual(
+    (await repo.listItems(theme.id)).map((i) => i.title),
+    ["残す項目", "新規A", "新規B"],
+  );
 });

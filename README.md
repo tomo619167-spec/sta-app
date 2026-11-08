@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/phase-2-roadmap
+git checkout codex/roadmap-ai-flow
 npm install
 npm run dev
 ```
@@ -37,8 +37,9 @@ npm start
 - 項目を展開して学習ボタンを押す2タップで開始。戻るとテーマ詳細の同じ項目を展開
 - 学習目標は必要な時に開く。コンパクトな「説明できる以上」の件数からロードマップ詳細管理へ移動
 - ロードマップ：テーマの到達目標、段階別の項目数、次に取り組む項目を表示。項目の追加・編集・削除・上下の並び替えに対応
-- 外部AIで作る：科目・テーマ・到達目標・学習レベル・補足から固定プロンプトを確認・コピー。AI APIは使用しない
-- JSONを取り込む：version 1のJSONを検証・プレビューし、既存項目の後へ一括追加。重複は確認し、失敗時は追加全体を取り消す
+- AIでロードマップを作成：プロンプト作成・コピー → 外部AIで生成 → JSON貼り付け・プレビュー・登録を1つの画面で進める。コピー後の自動遷移はなく、前のステップにも戻れる
+- 生成済みのJSONは「JSONを直接取り込む」から開始。既存のversion 1の検証・重複確認・一括追加を再利用
+- 入力とステップはテーマ別の下書きとして自動保存し、外部AIから戻った時や再読み込み時に復元。閉じても続きから開け、登録成功時に下書きを削除
 - テーマ全体と学習項目の両方から、同じ学習画面へ移動。現在の対象を明示
 - 科目アイコン：科目名から自動選択。「… → 科目を管理 → 科目の… → アイコンを変更」で手動変更・自動へ戻す
 - 習得度：テーマ名付近のバッジで確認。「テーマの… → 習得度を変更」で更新。項目・学習画面からも選択でき、変更履歴を保存
@@ -51,26 +52,29 @@ npm start
 
 ## 保存構造・移行
 
-同じ`yohaku-study`をIndexedDB **v4**へ自動移行します。ブラウザデータを消去せず、同じオリジン・同じブラウザで更新してください。
+同じ`yohaku-study`をIndexedDB **v5**へ自動移行します。ブラウザデータを消去せず、同じオリジン・同じブラウザで更新してください。
 
-| ストア            | 内容                                                      |
-| ----------------- | --------------------------------------------------------- |
-| subjects          | 科目のID・名称                                            |
-| themes            | 科目IDを持つテーマ。既存フィールドを維持                  |
-| items             | テーマID、項目名、到達目標、順序、習得状態                |
-| records           | 対象種別・ID、日時、内容、活動種別、新4段階評価、旧％評価 |
-| subject-icons     | 科目ID、アイコン、自動／手動、更新日時                    |
-| mastery-history   | 連番ID、対象種別・ID、習得度、変更日時                    |
-| legacy-themes-v1  | v1テーマ原本                                              |
-| legacy-records-v2 | 対象情報を追加する前の記録原本                            |
+| ストア            | 内容                                                           |
+| ----------------- | -------------------------------------------------------------- |
+| subjects          | 科目のID・名称                                                 |
+| themes            | 科目IDを持つテーマ。既存フィールドを維持                       |
+| items             | テーマID、項目名、到達目標、順序、習得状態                     |
+| records           | 対象種別・ID、日時、内容、活動種別、新4段階評価、旧％評価      |
+| subject-icons     | 科目ID、アイコン、自動／手動、更新日時                         |
+| mastery-history   | 連番ID、対象種別・ID、習得度、変更日時                         |
+| roadmap-drafts    | テーマ別の入力・生成プロンプト・コピー済み状態・JSON・ステップ |
+| legacy-themes-v1  | v1テーマ原本                                                   |
+| legacy-records-v2 | 対象情報を追加する前の記録原本                                 |
 
 v2からは、テーマ・科目・項目のIDと記録の本文・日時を維持し、項目に未設定の到達目標を追加します。記録原本を退避して、旧記録には`targetType: theme`、`targetId: 旧themeId`、`activity: memo`を付加します。旧記録に完成度を捏造しません。
 
-v1からは既存の科目・項目への移行後、同じトランザクションでv4まで進みます。移行の失敗は全体をロールバックし、元のバージョンでデータが残ります。成功後の再読み込みで二重移行しません。
+v1からは既存の科目・項目への移行後、同じトランザクションでv5まで進みます。移行の失敗は全体をロールバックし、元のバージョンでデータが残ります。成功後の再読み込みで二重移行しません。
 
 v3→v4では既存6ストアを更新せず、科目アイコンと習得度履歴のストアを追加します。既存科目のアイコンを初期設定し、旧％評価・旧習得済みを新評価へ変換しません。新評価はユーザーが選ぶまで「未評価」です。
 
-Phase 2のスキーマ変更はありません。テーマの既存の学習目標（`description`）と`items`を再利用し、別のロードマップデータは作りません。JSON取り込みはIDを新規発行し、既存項目・評価・記録を更新しません。新項目の習得度は未評価です。
+Phase 2本体のスキーマ変更はありませんでした。テーマの既存の学習目標（`description`）と`items`を再利用し、別のロードマップデータは作りません。JSON取り込みはIDを新規発行し、既存項目・評価・記録を更新しません。新項目の習得度は未評価です。
+
+v4→v5では`roadmap-drafts`ストアのみを追加し、既存8ストアの行は書き換えません。下書きはテーマIDをキーに保存し、項目の登録と同じトランザクションで削除します。登録失敗時は項目追加と下書き削除をまとめて取り消します。テーマ削除時はその下書きも削除します。
 
 ### 習得度とアウトプット完成度
 
@@ -86,9 +90,10 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 
 - `lib/model.ts`：データ型、入力検証、名前の正規化、進捗
 - `lib/storage/repository.ts`：保存処理のインターフェース
-- `lib/storage/indexed-db.ts`：IndexedDB v4アダプターとv1/v2/v3移行
+- `lib/storage/indexed-db.ts`：IndexedDB v5アダプターとv1〜v4移行
 - `lib/ratings.ts`：独立した評価基準、履歴の最新値、段階別集計
 - `lib/roadmap.ts`：表示順と次に取り組む項目
+- `lib/roadmap-draft.ts`：テーマ別の一時ドラフトの型・検証
 - `lib/roadmap-json.ts`：version 1の共通形式・検証・重複判定・固定プロンプト
 - `lib/subject-icons.ts`：キーワード判定とアイコン設定型
 - `lib/storage/index.ts`：アダプター選択。将来Supabase対応をここで切り替え
@@ -97,6 +102,7 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `components/study/daily-actions.tsx`：共通の2ボタン
 - `components/study/roadmap-items.tsx`：項目の展開・習得状態・編集
 - `components/study/roadmap-manager.tsx`：到達目標・進捗・作成ツールの管理画面
+- `components/study/roadmap-workflow.tsx`：プロンプトから取り込みまでの共通ダイアログとステップ
 - `components/study/`：既存の画面・フォーム・科目選択・メニュー
 - `components/ui/dialog.tsx`：VisualViewport対応のダイアログ
 - `components/study/editor-dialog.tsx`：共通の全画面入力レイアウト
@@ -117,9 +123,9 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 スマホのプロジェクトはタップ操作、PCはマウスクリックを使います。表示領域の縮小・移動を再現しますが、実機のOSキーボードを使うテストではありません。
 
-Phase 2では型チェック・ビルド・単体テスト31件・E2E 63件が成功しました。JSON検証、重複確認、一括追加のロールバック、並び替え、保存後の再読み込み、既存データ移行を含みます。
+Phase 2導線統合では型チェック・ビルド・単体テスト35件・E2E 72件が成功しました。JSON検証、重複確認、一括追加のロールバック、並び替え、保存後の再読み込み、既存データ移行、テーマ別のドラフト復元を含みます。
 
-今回のロードマップとJSON仕様は[docs/phase-2.md](docs/phase-2.md)、テーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
+今回の統合フロー・下書き保存は[docs/roadmap-ai-flow.md](docs/roadmap-ai-flow.md)、ロードマップとJSON仕様は[docs/phase-2.md](docs/phase-2.md)、テーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 
 ## 保存範囲
 

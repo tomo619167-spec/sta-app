@@ -1,3 +1,4 @@
+import { validateRoadmapDraft, type RoadmapDraft } from "../roadmap-draft";
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import {
   normalizeSubject,
@@ -33,6 +34,7 @@ import {
 import { sortStudyItems } from "../roadmap";
 import type { StudyRepository } from "./repository";
 interface StudyDB extends DBSchema {
+  "roadmap-drafts": { key: string; value: RoadmapDraft };
   "subject-icons": { key: string; value: SubjectIconSetting };
   "mastery-history": {
     key: number;
@@ -67,7 +69,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
   constructor(private readonly name = "yohaku-study") {}
   private db() {
     if (!this.connection)
-      this.connection = openDB<StudyDB>(this.name, 4, {
+      this.connection = openDB<StudyDB>(this.name, 5, {
         upgrade(db, oldVersion, _newVersion, tx) {
           // The open request reports upgrade failures; also consume tx.done.
           void tx.done.catch(() => {});
@@ -174,6 +176,10 @@ export class IndexedDBStudyRepository implements StudyRepository {
               }
             });
           }
+          if (oldVersion < 5) {
+            // Additive only: all existing learning data remains untouched.
+            db.createObjectStore("roadmap-drafts", { keyPath: "themeId" });
+          }
           if (oldVersion < 4) {
             db.createObjectStore("subject-icons", { keyPath: "subjectId" });
             const history = db.createObjectStore("mastery-history", {
@@ -223,6 +229,26 @@ export class IndexedDBStudyRepository implements StudyRepository {
         throw error;
       });
     return this.connection;
+  }
+  async getRoadmapDraft(themeId: string) {
+    const value = await (await this.db()).get("roadmap-drafts", themeId);
+    return value ? validateRoadmapDraft(value) : undefined;
+  }
+  async saveRoadmapDraft(draft: RoadmapDraft) {
+    const value = validateRoadmapDraft(draft);
+    const tx = (await this.db()).transaction(
+      ["themes", "roadmap-drafts"],
+      "readwrite",
+    );
+    try {
+      if (!(await tx.objectStore("themes").get(value.themeId)))
+        throw new Error("テーマが見つかりません。");
+      await tx.objectStore("roadmap-drafts").put(value);
+      await tx.done;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
   }
   async listSubjects() {
     return (await (await this.db()).getAll("subjects")).sort(
@@ -409,7 +435,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
   ) {
     const document = parseRoadmapJSON(source);
     const tx = (await this.db()).transaction(
-      ["themes", "subjects", "items"],
+      ["themes", "subjects", "items", "roadmap-drafts"],
       "readwrite",
     );
     try {
@@ -445,6 +471,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
         await tx.objectStore("items").add(value);
         added.push(value);
       }
+      await tx.objectStore("roadmap-drafts").delete(themeId);
       await tx.done;
       return added;
     } catch (error) {
@@ -459,6 +486,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
         "items",
         "records",
         "legacy-themes-v1",
+        "roadmap-drafts",
         "legacy-records-v2",
         "mastery-history",
       ],
@@ -477,6 +505,7 @@ export class IndexedDBStudyRepository implements StudyRepository {
           .getAllKeys(id);
         for (const key of keys) await tx.objectStore(name).delete(key);
       }
+      await tx.objectStore("roadmap-drafts").delete(id);
       await tx.objectStore("themes").delete(id);
       await tx.objectStore("legacy-themes-v1").delete(id);
       await tx.done;

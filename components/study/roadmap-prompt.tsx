@@ -1,102 +1,36 @@
 "use client";
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import type { Theme } from "@/lib/model";
-import {
-  buildRoadmapPrompt,
-  learningLevels,
-  type RoadmapPromptInput,
-} from "@/lib/roadmap-json";
+import { useRef } from "react";
+import { learningLevels } from "@/lib/roadmap-json";
+import type { RoadmapDraft } from "@/lib/roadmap-draft";
 import { Button } from "@/components/ui/button";
-import { EditorDialog } from "./editor-dialog";
 export function RoadmapPrompt({
-  theme,
+  draft,
   subject,
-  open,
-  onClose,
+  theme,
+  onChange,
+  onCopy,
+  busy,
 }: {
-  theme: Theme;
+  draft: RoadmapDraft;
   subject: string;
-  open: boolean;
-  onClose: () => void;
+  theme: string;
+  onChange: (patch: Partial<RoadmapDraft>) => void;
+  onCopy: () => void;
+  busy: boolean;
 }) {
-  const [goal, setGoal] = useState("");
-  const [level, setLevel] =
-    useState<RoadmapPromptInput["level"]>("high-school");
-  const [notes, setNotes] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [busy, setBusy] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
-  const wasOpen = useRef(false);
-  useEffect(() => {
-    if (open && !wasOpen.current) {
-      setGoal(theme.description);
-      setPrompt("");
-      setNotes("");
-      setCopied(false);
-      setError("");
-    }
-    wasOpen.current = open;
-  }, [open, theme.description]);
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    if (busy) return;
-    setError("");
-    if (!prompt) {
-      try {
-        setPrompt(
-          buildRoadmapPrompt({
-            subject,
-            theme: theme.name,
-            goal,
-            level,
-            notes,
-          }),
-        );
-        setCopied(false);
-      } catch (error) {
-        setError((error as Error).message);
-      }
-      return;
-    }
-    setBusy(true);
-    try {
-      await navigator.clipboard.writeText(prompt);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-      setError(
-        "コピーできませんでした。プロンプトを選択して、端末のコピー操作を使ってください。",
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
-    <EditorDialog
-      open={open}
-      onClose={onClose}
-      title="外部AIでロードマップを作る"
-      onSubmit={submit}
-      busy={busy}
-      error={error}
-      saveLabel={prompt ? "プロンプトをコピー" : "プロンプトを確認"}
-      onBack={
-        prompt
-          ? () => {
-              setPrompt("");
-              setError("");
-              setCopied(false);
-            }
-          : undefined
-      }
-    >
-      {prompt ? (
+    <fieldset className="workflow-fields" disabled={busy}>
+      {draft.step !== "conditions" ? (
         <>
           <p className="roadmap-hint">
             外部AIへ貼り付け、返ってきたJSONを取り込みます。
           </p>
+          {draft.copied && (
+            <p role="status" aria-label="コピー状況" className="copy-status">
+              コピーしました
+            </p>
+          )}
           <label htmlFor="roadmap-prompt-result">生成したプロンプト</label>
           <textarea
             ref={promptRef}
@@ -104,7 +38,7 @@ export function RoadmapPrompt({
             className="json-source"
             rows={14}
             readOnly
-            value={prompt}
+            value={draft.prompt}
           />
           <Button
             type="button"
@@ -116,10 +50,15 @@ export function RoadmapPrompt({
           >
             プロンプトを選択
           </Button>
-          {copied && (
-            <p role="status" className="copy-status">
-              コピーしました
-            </p>
+          {draft.copied && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={onCopy}
+            >
+              もう一度コピー
+            </Button>
           )}
         </>
       ) : (
@@ -130,7 +69,7 @@ export function RoadmapPrompt({
           </div>
           <div>
             <label htmlFor="prompt-theme">学習テーマ</label>
-            <input id="prompt-theme" value={theme.name} readOnly />
+            <input id="prompt-theme" value={theme} readOnly />
           </div>
           <div>
             <label htmlFor="prompt-goal">生成用の到達目標</label>
@@ -139,8 +78,14 @@ export function RoadmapPrompt({
               rows={4}
               required
               maxLength={1000}
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
+              value={draft.goal}
+              onChange={(event) =>
+                onChange({
+                  goal: event.target.value,
+                  prompt: "",
+                  copied: false,
+                })
+              }
             />
             <p className="roadmap-hint">テーマの到達目標は変更されません。</p>
           </div>
@@ -148,8 +93,14 @@ export function RoadmapPrompt({
             <label htmlFor="prompt-level">学習レベル</label>
             <select
               id="prompt-level"
-              value={level}
-              onChange={(event) => setLevel(event.target.value as typeof level)}
+              value={draft.level}
+              onChange={(event) =>
+                onChange({
+                  level: event.target.value as RoadmapDraft["level"],
+                  prompt: "",
+                  copied: false,
+                })
+              }
             >
               {Object.entries(learningLevels).map(([key, label]) => (
                 <option key={key} value={key}>
@@ -166,12 +117,18 @@ export function RoadmapPrompt({
               id="prompt-notes"
               rows={3}
               maxLength={2000}
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
+              value={draft.notes}
+              onChange={(event) =>
+                onChange({
+                  notes: event.target.value,
+                  prompt: "",
+                  copied: false,
+                })
+              }
             />
           </div>
         </>
       )}
-    </EditorDialog>
+    </fieldset>
   );
 }
