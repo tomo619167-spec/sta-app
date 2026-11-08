@@ -1,3 +1,4 @@
+import type { RoadmapDraft } from "../roadmap-draft";
 import type { SubjectIconKey, SubjectIconSetting } from "../subject-icons";
 import type {
   Subject,
@@ -11,6 +12,8 @@ import type {
   ThemeInput,
 } from "../model";
 export interface StudyRepository {
+  getRoadmapDraft(themeId: string): Promise<RoadmapDraft | undefined>;
+  saveRoadmapDraft(draft: RoadmapDraft): Promise<void>;
   listSubjectIcons(): Promise<SubjectIconSetting[]>;
   setSubjectIcon(
     subjectId: string,

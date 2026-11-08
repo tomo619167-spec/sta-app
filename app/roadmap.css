@@ -252,3 +252,65 @@
     margin-left: 0;
   }
 }
+
+.roadmap-tools {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
+}
+.roadmap-tools button:last-child {
+  min-height: var(--tap-size);
+  justify-self: center;
+  font-size: var(--text-small);
+  color: var(--muted-foreground);
+}
+.workflow-steps {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-2);
+  list-style: none;
+  padding: 0 0 var(--space-4);
+  margin: 0;
+  border-bottom: var(--line-width) solid var(--border);
+}
+.workflow-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+}
+.workflow-steps li > span {
+  font-family: var(--font-numerals);
+  font-size: var(--text-body);
+}
+.workflow-steps [aria-current="step"] {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.workflow-steps [data-complete="true"] > span {
+  color: var(--primary);
+}
+.workflow-fields {
+  display: contents;
+  border: 0;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+}
+.workflow-footer {
+  display: grid;
+  gap: var(--space-2);
+}
+.draft-status {
+  font-size: var(--text-caption);
+  color: var(--muted-foreground);
+  margin: 0;
+}
+@media (max-width: 359px) {
+  .workflow-steps {
+    gap: var(--space-1);
+  }
+  .workflow-steps li {
+    font-size: 11px;
+  }
+}
