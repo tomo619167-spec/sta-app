@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/phase-3-learning
+git checkout codex/phase-3-questions
 npm install
 npm run dev
 ```
@@ -45,9 +45,9 @@ npm start
 - 習得度：テーマ名付近のバッジで確認。「テーマの… → 習得度を変更」で更新。項目・学習画面からも選択でき、変更履歴を保存
 - アウトプット：今回の説明を任意の4段階で評価。各回の日時・内容・評価を履歴表示し、記録画面で対象・種類を絞り込み可能
 - アウトプット本文は30,000文字まで。到達目標は必要な時だけ開き、対象別に下書きを自動保存・復元
-- 理解を深める：5種類の問い、自分の問い・仮説・気づきを記録。仮説まで保存して外部AIに相談し、後から気づきを編集できる
+- 理解を深める：6種類のテンプレートから自分の問いを一つ書き、保存・編集・削除。対象名は自動で入り、保存した問いから外部AIに相談できる
 - 記録を開く：本文の閲覧、完成度の確認、編集・確認付き削除。科目・テーマ・項目で絞り込み、項目のロードマップから記録へ移動
-- AIフィードバック：コピー → 結果の貼り付け → JSONプレビュー → 保存。作業途中も復元し、自己評価・習得度・自分の気づきと分離
+- AIフィードバック：コピー → 結果の貼り付け → JSONプレビュー → 保存。作業途中も復元し、自己評価・習得度・自分の問いと分離
 - スマホ入力：既存の全画面フォーム・VisualViewport対応を再利用
 
 過去問・ポモドーロタイマーは準備中です。アプリ内AI・独自の音声認識APIは搭載しません。テキスト欄は端末の標準キーボードの音声入力を利用できる構成ですが、実機での音声入力は未検証です。
@@ -67,7 +67,7 @@ npm start
 | subject-icons     | 科目ID、アイコン、自動／手動、更新日時                         |
 | mastery-history   | 連番ID、対象種別・ID、習得度、変更日時                         |
 | roadmap-drafts    | テーマ別の入力・生成プロンプト・コピー済み状態・JSON・ステップ |
-| learning-drafts   | 対象・活動別の本文、評価、問い・仮説・気づきの下書き           |
+| learning-drafts   | 対象・活動別の本文、評価、問いの下書き                         |
 | learning-feedback | 記録別のAIフィードバック、対象、元の本文と版                   |
 | feedback-drafts   | 記録別のプロンプト・JSON・ステップの一時保存                   |
 | legacy-themes-v1  | v1テーマ原本                                                   |
@@ -101,7 +101,7 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `lib/storage/repository.ts`：保存処理のインターフェース
 - `lib/storage/indexed-db.ts`：IndexedDB v6アダプターとv1〜v5移行
 - `lib/learning.ts`：対象別の学習入力・下書き・記録の版
-- `lib/learning-feedback.ts`：外部AIプロンプト、version 1のJSON検証、フィードバックの型
+- `lib/learning-feedback.ts`：外部AIプロンプト、version 1・2のJSON検証、フィードバックの型
 - `lib/json.ts`：ロードマップとフィードバックで共有するJSON検証
 - `lib/ratings.ts`：独立した評価基準、履歴の最新値、段階別集計
 - `lib/roadmap.ts`：表示順と次に取り組む項目
@@ -111,7 +111,7 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `lib/storage/index.ts`：アダプター選択。将来Supabase対応をここで切り替え
 - `lib/learning-context.ts`：学習対象の解決と遷移URL。過去問は科目IDを主対象、テーマIDを任意の絞り込みとして扱う
 - `components/study/learning-screen.tsx`：テーマ・項目共通の学習画面
-- `components/study/learning-editor.tsx`：長文入力、4段階評価、問い・仮説・気づきと下書き保存
+- `components/study/learning-editor.tsx`：長文入力、4段階評価、問いのテンプレートと下書き保存
 - `components/study/record-detail.tsx`：記録の閲覧・編集・削除とAIフィードバック
 - `components/study/feedback-workflow.tsx`：外部AIとのコピー・JSON取り込みの共通フロー
 - `components/study/daily-actions.tsx`：共通の2ボタン

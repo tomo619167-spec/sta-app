@@ -429,12 +429,7 @@ async function saveLearning(page: Page, note: string, rating?: string) {
     .waitFor({ state: "visible" });
   if (await page.getByLabel("アウトプット本文", { exact: true }).count())
     await page.getByLabel("アウトプット本文", { exact: true }).fill(note);
-  else {
-    await page
-      .getByLabel("自分で考えた問い", { exact: true })
-      .fill("なぜ、この出来事が起きたのか");
-    await page.getByLabel("自分の仮説", { exact: true }).fill(note);
-  }
+  else await page.getByLabel("自分で考えた問い", { exact: true }).fill(note);
 
   if (rating !== undefined)
     await activate(page.getByRole("radio", { name: rating, exact: true }));
@@ -2003,7 +1998,7 @@ test("Phase 3 output drafts restore long multiline text and optional ratings, th
     page.getByLabel("アウトプット本文", { exact: true }),
   ).toHaveValue("");
 });
-test("Phase 3 deepening keeps own hypothesis and insight separate from escaped AI feedback and preserves both across editing", async ({
+test("Phase 3 deepening uses six safe templates and keeps the question separate from escaped AI feedback", async ({
   page,
 }) => {
   await page.addInitScript(() =>
@@ -2020,12 +2015,37 @@ test("Phase 3 deepening keeps own hypothesis and insight separate from escaped A
       .getByRole("link", { name: "理解を深める", exact: true }),
   );
   await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
+  const question = page.getByLabel("自分で考えた問い", { exact: true });
+  await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
+  await expect(question).toHaveValue("フランス革命とは？");
+  for (const [kind, template] of [
+    ["なぜ？", "なぜ「フランス革命」が重要なのか？"],
+    ["どうやって？", "フランス革命はどのような仕組みなのか？"],
+    ["何が違う？", "フランス革命と△△は何が違う？"],
+    ["もし〜だったら？", "もし△△だったら、フランス革命はどうなる？"],
+    ["何とつながる？", "フランス革命は△△とどう関係する？"],
+  ]) {
+    await activate(page.getByRole("radio", { name: kind, exact: true }));
+    await expect(question).toHaveValue(template);
+  }
+  await question.fill("税負担と社会の不満はどうつながる？");
+  await activate(page.getByRole("radio", { name: "何が違う？", exact: true }));
+  await expect(question).toHaveValue("税負担と社会の不満はどうつながる？");
+  await activate(
+    page.getByRole("button", { name: "テンプレートで置き換える", exact: true }),
+  );
+  await expect(question).toHaveValue("フランス革命と△△は何が違う？");
+  await question.fill("税負担と社会の不満はどうつながる？");
   await activate(
     page.getByRole("radio", { name: "何とつながる？", exact: true }),
   );
-  await page
-    .getByLabel("自分で考えた問い", { exact: true })
-    .fill("税負担と社会の不満はどうつながる？");
+  await activate(
+    page.getByRole("button", {
+      name: "文章を残して種類だけ変える",
+      exact: true,
+    }),
+  );
+  await expect(question).toHaveValue("税負担と社会の不満はどうつながる？");
   await waitForDraft(page);
   await page.reload();
   await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
@@ -2035,16 +2055,14 @@ test("Phase 3 deepening keeps own hypothesis and insight separate from escaped A
   await expect(
     page.getByLabel("自分で考えた問い", { exact: true }),
   ).toHaveValue("税負担と社会の不満はどうつながる？");
-  await page
-    .getByLabel("自分の仮説", { exact: true })
-    .fill("負担の偏りが不満を生んだと考える");
   await activate(
     page.getByRole("button", { name: "保存して外部AIへ", exact: true }),
   );
   await expect(page).toHaveURL(/\/records\/.*ai=1/);
   await expect(page.getByRole("dialog")).toBeVisible();
   const { prompt, document } = await promptDocument(page);
-  expect(prompt).toContain("負担の偏り");
+  expect(prompt).toContain("税負担と社会の不満はどうつながる？");
+  expect(document.version).toBe(2);
   expect(document.kind).toBe("deepen");
   await activate(
     page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
@@ -2058,7 +2076,7 @@ test("Phase 3 deepening keeps own hypothesis and insight separate from escaped A
   await activate(
     page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
   );
-  document.assessment =
+  document.explanation =
     '<img src=x onerror="window.injected=true">は文字として扱う';
   document.questions = ["ほかの身分の視点からどう考える？"];
   await page
@@ -2066,32 +2084,31 @@ test("Phase 3 deepening keeps own hypothesis and insight separate from escaped A
     .fill(JSON.stringify(document));
   await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
   await expect(
-    page.getByText(document.assessment, { exact: true }),
+    page.getByText(document.explanation, { exact: true }),
   ).toBeVisible();
   await expect(page.locator(".feedback-body img")).toHaveCount(0);
   await waitForDraft(page);
   await page.reload();
   await expect(
-    page.getByText(document.assessment, { exact: true }),
+    page.getByText(document.explanation, { exact: true }),
   ).toBeVisible();
   await activate(
     page.getByRole("button", { name: "フィードバックを保存", exact: true }),
   );
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await expect(page.locator(".deepening-content")).toContainText(
-    "まだ記録していません",
+    "税負担と社会の不満はどうつながる？",
   );
   await expect(page.locator(".feedback-entry")).toContainText(
-    document.assessment,
+    document.explanation,
   );
   await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await expect(page.getByLabel("新たな気づき")).toHaveValue("");
-  await page.getByLabel("新たな気づき").fill("自分で比較して得た気づき");
+  await question.fill("別の立場から税負担をどう考える？");
   await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.reload();
   await expect(page.locator(".deepening-content")).toContainText(
-    "自分で比較して得た気づき",
+    "別の立場から税負担をどう考える？",
   );
   await expect(
     page.getByText("編集前の記録へのフィードバック", { exact: true }),

@@ -278,7 +278,8 @@ export function FeedbackWorkflow({
                   setError("");
                   update({ source });
                 }}
-                example={feedbackExample(record)}
+                example={feedbackExample(record, data.formatVersion ?? 1)}
+                version={data.formatVersion ?? 1}
               />
             )
           )}
