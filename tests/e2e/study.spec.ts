@@ -2014,6 +2014,9 @@ test("Phase 3 deepening uses six safe templates and keeps the question separate 
       .getByRole("navigation", { name: "テーマ全体の学習" })
       .getByRole("link", { name: "理解を深める", exact: true }),
   );
+  await expect(
+    page.getByRole("heading", { name: "理解を深める", level: 1, exact: true }),
+  ).toBeVisible();
   await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
   const question = page.getByLabel("自分で考えた問い", { exact: true });
   await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
