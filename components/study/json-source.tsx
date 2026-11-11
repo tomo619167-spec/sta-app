@@ -8,7 +8,7 @@ export function JSONSource({
   value: string;
   onChange: (value: string) => void;
   example: unknown;
-  version?: 1 | 2;
+  version?: 1 | 2 | 3;
 }) {
   return (
     <>

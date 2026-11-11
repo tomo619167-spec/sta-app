@@ -18,6 +18,7 @@ import { ActionMenu } from "./action-menu";
 import { LearningEditor } from "./learning-editor";
 import { FeedbackWorkflow } from "./feedback-workflow";
 import { FeedbackBody } from "./feedback-body";
+import { OutputComparison } from "./output-comparison";
 export function RecordDetail({
   id,
   autoAI = false,
@@ -94,6 +95,9 @@ export function RecordDetail({
       <section className="learning-target" aria-label="現在の学習対象">
         <span>{target.type === "theme" ? "テーマ全体" : "学習項目"}</span>
         <h2>{name}</h2>
+        {record.activity === "output" && record.title && (
+          <p className="record-output-title">{record.title}</p>
+        )}
       </section>
       <div className="record-dates">
         <time dateTime={record.createdAt ?? record.studiedAt}>
@@ -113,14 +117,20 @@ export function RecordDetail({
         <p className="record-full-text">{record.note}</p>
       )}
       {record.activity === "deepen" &&
-        (record.hypothesis || record.insight) && (
+        (record.hypothesis || record.unknowns || record.insight) && (
           <details className="learning-goal">
-            <summary>以前の仮説・気づき</summary>
+            <summary>自分の考え・気づき</summary>
             <dl className="deepening-content">
               {record.hypothesis && (
                 <>
                   <dt>自分の仮説</dt>
                   <dd>{record.hypothesis}</dd>
+                </>
+              )}
+              {record.unknowns && (
+                <>
+                  <dt>不明点</dt>
+                  <dd>{record.unknowns}</dd>
                 </>
               )}
               {record.insight && (
@@ -136,6 +146,9 @@ export function RecordDetail({
         <p className="record-evaluation">
           今回の完成度 · {outputLabel(record.outputRating)}
         </p>
+      )}
+      {record.activity === "output" && (
+        <OutputComparison current={record} records={records} />
       )}
       {record.completion !== undefined && (
         <p className="legacy-rating">旧評価 {record.completion}%</p>

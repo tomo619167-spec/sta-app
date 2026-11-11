@@ -12,7 +12,7 @@ export type QuestionKind = keyof typeof questionKinds;
 export function questionTemplate(kind: QuestionKind, title: string) {
   const templates: Record<QuestionKind, string> = {
     definition: `${title}とは？`,
-    why: `なぜ「${title}」が重要なのか？`,
+    why: `「${title}」にはどのような理由や背景があるのか？`,
     how: `${title}はどのような仕組みなのか？`,
     compare: `${title}と△△は何が違う？`,
     connect: `${title}は△△とどう関係する？`,
@@ -24,6 +24,10 @@ export type LearningKind = "output" | "deepen";
 export interface LearningInput {
   activity: LearningKind;
   note: string;
+  title?: string;
+  hypothesis?: string;
+  unknowns?: string;
+  insight?: string;
   outputRating?: FourLevel;
   questionKind?: QuestionKind;
   question?: string;
@@ -48,9 +52,6 @@ export interface LearningDraft extends LearningInput {
   targetId: string;
   recordId?: string;
   baseRevision?: string;
-  /** Read-only content carried over from older drafts. */
-  hypothesis?: string;
-  insight?: string;
 }
 export type OutputDraft = LearningDraft & { activity: "output" };
 export type DeepeningDraft = LearningDraft & { activity: "deepen" };
@@ -77,10 +78,14 @@ export function initialLearningDraft(
     baseRevision: record ? recordRevision(record) : undefined,
     activity,
     note: record?.note ?? "",
+    title: record?.title,
     outputRating: record?.outputRating,
     ...(activity === "deepen" && {
       questionKind: record?.questionKind ?? "definition",
       question: record?.question ?? record?.note ?? "",
+      hypothesis: record?.hypothesis ?? "",
+      unknowns: record?.unknowns ?? "",
+      insight: record?.insight ?? "",
     }),
   };
 }
@@ -95,6 +100,9 @@ function limited(value: unknown, label: string, max: number, required = false) {
     );
   return value;
 }
+function optionalText(value: string | undefined, label: string, max: number) {
+  return value === undefined ? undefined : limited(value, label, max);
+}
 export function validateLearningInput(
   input: LearningInput,
   draft = false,
@@ -105,6 +113,7 @@ export function validateLearningInput(
     return {
       activity: "output",
       note: limited(input.note, "アウトプット本文", 30000, !draft),
+      title: optionalText(input.title, "タイトル", 160),
       outputRating:
         input.outputRating === undefined
           ? undefined
@@ -118,6 +127,15 @@ export function validateLearningInput(
     note: question,
     questionKind: input.questionKind,
     question,
+    ...(input.hypothesis !== undefined && {
+      hypothesis: optionalText(input.hypothesis, "自分の仮説・考え", 15000),
+    }),
+    ...(input.unknowns !== undefined && {
+      unknowns: optionalText(input.unknowns, "不明点", 15000),
+    }),
+    ...(input.insight !== undefined && {
+      insight: optionalText(input.insight, "新たな気づき", 15000),
+    }),
   };
 }
 export function validateLearningDraft(draft: LearningDraft) {
@@ -153,6 +171,8 @@ export function recordRevision(record: StudyRecord) {
 export function recordSnapshot(record: StudyRecord) {
   return {
     note: record.note,
+    title: record.title,
+    unknowns: record.unknowns,
     questionKind: record.questionKind,
     question: record.question,
     hypothesis: record.hypothesis,

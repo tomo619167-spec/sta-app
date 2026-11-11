@@ -1377,8 +1377,8 @@ test("deepening partial drafts resume, edits retain the original date and output
     question: "別の問い？",
   });
   assert.notEqual(another.id, first.id);
-  assert.equal(another.hypothesis, undefined);
-  assert.equal(another.insight, undefined);
+  assert.equal(another.hypothesis, "");
+  assert.equal(another.insight, "");
   assert.equal(updated.outputRating, undefined);
   assert.equal(await repo.getLearningDraft(edit.key), undefined);
   assert.equal((await repo.listRecords()).length, 2);
@@ -1469,12 +1469,16 @@ test("both feedback prompts produce the exact versioned schema and reject malfor
     assert.match(prompt, /不確実/);
     assert.match(prompt, /1〜3/);
     if (activity === "deepen") {
-      assert.equal(document.version, 2);
-      assert.match(prompt, /定義・本質・具体例/);
-      assert.doesNotMatch(prompt, /自分の仮説|自分の気づき/);
+      assert.equal(document.version, 3);
+      assert.match(prompt, /簡潔な定義/);
+      assert.match(prompt, /自分の仮説と考え/);
       assert.deepEqual(
         parseFeedbackJSON(JSON.stringify(feedbackExample(record, 1))),
         feedbackExample(record, 1),
+      );
+      assert.deepEqual(
+        parseFeedbackJSON(JSON.stringify(feedbackExample(record, 2))),
+        feedbackExample(record, 2),
       );
       assert.throws(
         () =>
@@ -1485,7 +1489,7 @@ test("both feedback prompts produce the exact versioned schema and reject malfor
     for (const source of [
       "{",
       "```json\n{}\n```",
-      JSON.stringify({ ...document, version: 3 }),
+      JSON.stringify({ ...document, version: 4 }),
       JSON.stringify({ ...document, questions: [] }),
       JSON.stringify({ ...document, questions: ["a", "b", "c", "d"] }),
       JSON.stringify({ ...document, uncertainty: undefined }),
@@ -1694,4 +1698,132 @@ test("a failed v6 upgrade restores v5 and all its originals, then retries withou
   db.close();
   assert.deepEqual(await repo.listFeedbacks(), []);
   assert.ok((await repo.listRecords()).length);
+});
+
+test("output titles persist with drafts and edits, while earlier sessions keep their own ratings", async () => {
+  const { repo, theme, item, itemTarget, themeTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    title: "因果関係を説明する",
+    note: "一回目",
+    outputRating: 1 as const,
+  };
+  await repo.saveLearningDraft(draft);
+  await repo.close();
+  assert.deepEqual(await repo.getLearningDraft(draft.key), draft);
+  const first = await repo.saveLearningRecord(draft);
+  const second = await repo.saveLearningRecord({
+    ...draft,
+    title: "復習して説明",
+    note: "二回目",
+    outputRating: 4,
+  });
+  const edited = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "output", second),
+    title: "復習後の説明",
+    note: "編集した二回目",
+  });
+  assert.equal(edited.title, "復習後の説明");
+  assert.equal(
+    (await repo.listRecords()).find((record) => record.id === first.id)
+      ?.outputRating,
+    1,
+  );
+  assert.equal(edited.outputRating, 4);
+  const defaultItem = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "output"),
+    note: "タイトル未設定",
+  });
+  const defaultTheme = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "テーマ全体",
+  });
+  assert.equal(defaultItem.title, item.title);
+  assert.equal(defaultTheme.title, theme.name);
+  await assert.rejects(
+    repo.saveLearningDraft({ ...draft, title: "a".repeat(161) }),
+    /タイトル/,
+  );
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+});
+test("optional reflections resume and can be edited or cleared without losing old fields on minimal legacy edits", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "需要と供給とは？",
+    hypothesis: "自分なりの説明",
+    unknowns: "価格が動く条件",
+    insight: "曲線の違いに気づいた",
+  };
+  await repo.saveLearningDraft(draft);
+  await repo.close();
+  assert.deepEqual(await repo.getLearningDraft(draft.key), draft);
+  const first = await repo.saveLearningRecord(draft);
+  const minimal = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen", first),
+    question: "需要だけが変化したら？",
+  };
+  delete minimal.hypothesis;
+  delete minimal.unknowns;
+  delete minimal.insight;
+  const legacyEdited = await repo.saveLearningRecord(minimal);
+  assert.equal(legacyEdited.hypothesis, draft.hypothesis);
+  assert.equal(legacyEdited.unknowns, draft.unknowns);
+  assert.equal(legacyEdited.insight, draft.insight);
+  const cleared = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "deepen", legacyEdited),
+    hypothesis: "",
+    unknowns: "",
+    insight: "",
+  });
+  assert.equal(cleared.hypothesis, "");
+  assert.equal(cleared.unknowns, "");
+  assert.equal(cleared.insight, "");
+  await assert.rejects(
+    repo.saveLearningDraft({ ...draft, unknowns: "a".repeat(15001) }),
+    /不明点/,
+  );
+  assert.equal(cleared.createdAt, first.createdAt);
+});
+test("deepening v3 uses the learner explanation and preserves versioned feedback separately", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  const record = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "需要とは？",
+    hypothesis: "買いたい量",
+    unknowns: "所得との関係",
+    insight: "価格の条件がある",
+  });
+  const prompt = buildFeedbackPrompt(record, theme, "経済学");
+  for (const text of [
+    "買いたい量",
+    "所得との関係",
+    "価格の条件がある",
+    "仮説の妥当性",
+    "反例",
+    "別の視点",
+    "簡潔な定義",
+    "似た概念との違い",
+  ])
+    assert.ok(prompt.includes(text));
+  const document = parseFeedbackJSON(prompt.split("\n\n").at(-1)!);
+  assert.equal(document.version, 3);
+  for (const field of [
+    "hints",
+    "features",
+    "counterexamples",
+    "perspectives",
+    "examples",
+    "comparisons",
+  ])
+    assert.throws(() =>
+      parseFeedbackJSON(JSON.stringify({ ...document, [field]: undefined })),
+    );
+  for (const version of [1, 2, 3])
+    await repo.importFeedback(
+      record.id,
+      JSON.stringify(feedbackExample(record, version)),
+    );
+  assert.equal((await repo.listFeedbacks()).length, 3);
+  assert.deepEqual((await repo.listRecords())[0], record);
 });
