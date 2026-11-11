@@ -139,6 +139,11 @@ export function RecordList({
                     </span>
                   )}
                 </div>
+                {record.activity === "output" && record.title && (
+                  <strong className="record-output-title">
+                    {record.title}
+                  </strong>
+                )}
                 <p className="record-excerpt">
                   <Link href={`/records/${record.id}`}>{record.note}</Link>
                 </p>

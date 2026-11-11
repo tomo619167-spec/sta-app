@@ -8,18 +8,28 @@ export function FeedbackBody({ document }: { document: FeedbackDocument }) {
           ["誤解の可能性", document.misunderstandings],
           ["改善のヒント", document.advice],
         ]
-      : document.version === 2
+      : document.version === 3
         ? [
-            ["問いへの説明", document.explanation],
-            ["具体例", document.examples],
-            ["比較", document.comparisons],
-            ["誤解しやすい点", document.misunderstandings],
-          ]
-        : [
-            ["仮説の検討", document.assessment],
+            ["フィードバック", document.explanation],
+            ["考えるヒント", document.hints],
             ["反例", document.counterexamples],
             ["別の視点", document.perspectives],
-          ];
+            ["本質的な特徴", document.features],
+            ["具体例", document.examples],
+            ["似た概念との違い", document.comparisons],
+          ]
+        : document.version === 2
+          ? [
+              ["問いへの説明", document.explanation],
+              ["具体例", document.examples],
+              ["比較", document.comparisons],
+              ["誤解しやすい点", document.misunderstandings],
+            ]
+          : [
+              ["仮説の検討", document.assessment],
+              ["反例", document.counterexamples],
+              ["別の視点", document.perspectives],
+            ];
   return (
     <div className="feedback-body">
       <p className="roadmap-hint">AIの参考情報 · 自己評価とは別に保存</p>

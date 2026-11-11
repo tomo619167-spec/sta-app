@@ -41,9 +41,13 @@
 }
 .question-picker input {
   position: absolute;
+  inset: 0;
   opacity: 0;
-  width: 1px;
-  height: 1px;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  z-index: 1;
+  cursor: pointer;
 }
 .question-picker label:focus-within {
   outline: 2px solid var(--primary);
@@ -145,4 +149,73 @@
 }
 .history-more-filters .history-filter {
   margin-bottom: var(--space-3);
+}
+
+.question-picker label {
+  gap: var(--space-2);
+}
+.question-picker svg {
+  flex-shrink: 0;
+  color: var(--primary);
+}
+.reflection-fields summary,
+.output-comparison summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-size: var(--text-label);
+}
+.reflection-fields .form-stack {
+  padding-top: var(--space-4);
+}
+.output-comparison {
+  margin-block: var(--space-5);
+  border-block: 1px solid var(--border);
+  padding-block: var(--space-3);
+}
+.output-rating-timeline {
+  list-style: none;
+  padding: 0;
+  margin-block: var(--space-4);
+  font-size: var(--text-small);
+}
+.output-rating-timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding-block: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.output-rating-timeline time {
+  color: var(--muted-foreground);
+}
+.comparison-texts {
+  display: grid;
+  gap: var(--space-5);
+  margin-block: var(--space-4);
+}
+.comparison-texts h3 {
+  font-size: var(--text-label);
+  margin-bottom: var(--space-2);
+}
+.comparison-texts p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.9;
+  max-height: 45vh;
+  overflow: auto;
+}
+.record-output-title {
+  display: block;
+  font-size: var(--text-label);
+  font-weight: 500;
+  margin-block: var(--space-2);
+  overflow-wrap: anywhere;
+}
+@media (min-width: 700px) {
+  .comparison-texts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }

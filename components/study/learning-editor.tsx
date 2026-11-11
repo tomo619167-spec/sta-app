@@ -1,4 +1,12 @@
 "use client";
+import {
+  BookOpen,
+  CircleHelp,
+  Route,
+  GitCompareArrows,
+  Network,
+  Shuffle,
+} from "lucide-react";
 import { useRef, useState, type FormEvent } from "react";
 import type { StudyRecord, StudyTarget } from "@/lib/model";
 import {
@@ -18,6 +26,14 @@ import { FourLevelPicker } from "./four-level-picker";
 import { useStudy } from "./provider";
 import { usePersistentDraft } from "./use-persistent-draft";
 import { DraftStatus } from "./draft-status";
+const questionIcons = {
+  definition: BookOpen,
+  why: CircleHelp,
+  how: Route,
+  compare: GitCompareArrows,
+  connect: Network,
+  whatif: Shuffle,
+};
 export function LearningEditor({
   themeId,
   target,
@@ -42,13 +58,24 @@ export function LearningEditor({
   const state = usePersistentDraft(
     learningDraftKey(activity, target, record?.id),
     {
-      load: () =>
-        studyRepository.getLearningDraft(
+      load: async () => {
+        const saved = await studyRepository.getLearningDraft(
           learningDraftKey(activity, target, record?.id),
-        ),
+        );
+        return saved
+          ? {
+              ...initialLearningDraft(themeId, target, activity, record),
+              ...saved,
+              ...(activity === "output" && {
+                title: saved.title ?? record?.title ?? name,
+              }),
+            }
+          : undefined;
+      },
       save: (value) => studyRepository.saveLearningDraft(value),
       initial: () => {
         const draft = initialLearningDraft(themeId, target, activity, record);
+        if (activity === "output") draft.title = record?.title ?? name;
         if (activity === "deepen" && !record)
           draft.question = questionTemplate("definition", name);
         return draft;
@@ -169,6 +196,18 @@ export function LearningEditor({
         <fieldset className="workflow-fields" disabled={busy || state.loading}>
           {activity === "output" ? (
             <>
+              <p className="roadmap-hint">何も見ずに、自分の言葉で説明する。</p>
+              <div>
+                <label htmlFor="output-title">タイトル</label>
+                <input
+                  id="output-title"
+                  maxLength={160}
+                  value={value.title ?? name}
+                  onChange={(event) =>
+                    state.update({ title: event.target.value })
+                  }
+                />
+              </div>
               <div>
                 <label htmlFor="output-body">アウトプット本文</label>
                 <textarea
@@ -195,21 +234,25 @@ export function LearningEditor({
               <fieldset className="question-picker">
                 <legend>問いの種類</legend>
                 <div>
-                  {Object.entries(questionKinds).map(([key, label]) => (
-                    <label
-                      key={key}
-                      className={value.questionKind === key ? "selected" : ""}
-                    >
-                      <input
-                        type="radio"
-                        name="question-kind"
-                        value={key}
-                        checked={value.questionKind === key}
-                        onChange={() => chooseKind(key as QuestionKind)}
-                      />
-                      <span>{label}</span>
-                    </label>
-                  ))}
+                  {Object.entries(questionKinds).map(([key, label]) => {
+                    const Icon = questionIcons[key as QuestionKind];
+                    return (
+                      <label
+                        key={key}
+                        className={value.questionKind === key ? "selected" : ""}
+                      >
+                        <input
+                          type="radio"
+                          name="question-kind"
+                          value={key}
+                          checked={value.questionKind === key}
+                          onChange={() => chooseKind(key as QuestionKind)}
+                        />
+                        <Icon size={16} aria-hidden="true" />
+                        <span>{label}</span>
+                      </label>
+                    );
+                  })}
                 </div>
               </fieldset>
               {suggestedKind && (
@@ -254,6 +297,50 @@ export function LearningEditor({
                   }
                 />
               </div>
+              <details className="reflection-fields">
+                <summary>
+                  自分の考え・気づきを残す{" "}
+                  <span className="optional-label">任意</span>
+                </summary>
+                <div className="form-stack">
+                  <div>
+                    <label htmlFor="deep-hypothesis">自分の仮説・考え</label>
+                    <textarea
+                      id="deep-hypothesis"
+                      rows={5}
+                      maxLength={15000}
+                      value={value.hypothesis ?? ""}
+                      onChange={(event) =>
+                        state.update({ hypothesis: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="deep-unknowns">不明点</label>
+                    <textarea
+                      id="deep-unknowns"
+                      rows={3}
+                      maxLength={15000}
+                      value={value.unknowns ?? ""}
+                      onChange={(event) =>
+                        state.update({ unknowns: event.target.value })
+                      }
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="deep-insight">新たな気づき</label>
+                    <textarea
+                      id="deep-insight"
+                      rows={5}
+                      maxLength={15000}
+                      value={value.insight ?? ""}
+                      onChange={(event) =>
+                        state.update({ insight: event.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+              </details>
             </>
           )}
           <Button

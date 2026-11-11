@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/phase-3-questions
+git checkout codex/phase-3-final
 npm install
 npm run dev
 ```
@@ -44,9 +44,9 @@ npm start
 - 科目アイコン：科目名から自動選択。「… → 科目を管理 → 科目の… → アイコンを変更」で手動変更・自動へ戻す
 - 習得度：テーマ名付近のバッジで確認。「テーマの… → 習得度を変更」で更新。項目・学習画面からも選択でき、変更履歴を保存
 - アウトプット：今回の説明を任意の4段階で評価。各回の日時・内容・評価を履歴表示し、記録画面で対象・種類を絞り込み可能
-- アウトプット本文は30,000文字まで。到達目標は必要な時だけ開き、対象別に下書きを自動保存・復元
-- 理解を深める：6種類のテンプレートから自分の問いを一つ書き、保存・編集・削除。対象名は自動で入り、保存した問いから外部AIに相談できる
-- 記録を開く：本文の閲覧、完成度の確認、編集・確認付き削除。科目・テーマ・項目で絞り込み、項目のロードマップから記録へ移動
+- アウトプット本文は30,000文字まで。タイトルは対象名を初期値として編集可能。到達目標は必要な時だけ開き、タイトル・本文・評価を対象別に下書き保存・復元
+- 理解を深める：アイコン付きの6種類のテンプレートから問いを書き、任意で仮説・不明点・気づきを記録。保存・編集・削除・下書き再開に対応
+- 記録を開く：本文の閲覧、完成度の確認、編集・確認付き削除。同じ対象の過去のアウトプットと本文・評価を比較。科目・テーマ・項目で絞り込み、項目のロードマップから記録へ移動
 - AIフィードバック：コピー → 結果の貼り付け → JSONプレビュー → 保存。作業途中も復元し、自己評価・習得度・自分の問いと分離
 - スマホ入力：既存の全画面フォーム・VisualViewport対応を再利用
 
@@ -101,7 +101,7 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `lib/storage/repository.ts`：保存処理のインターフェース
 - `lib/storage/indexed-db.ts`：IndexedDB v6アダプターとv1〜v5移行
 - `lib/learning.ts`：対象別の学習入力・下書き・記録の版
-- `lib/learning-feedback.ts`：外部AIプロンプト、version 1・2のJSON検証、フィードバックの型
+- `lib/learning-feedback.ts`：外部AIプロンプト、version 1・2・3のJSON検証、フィードバックの型
 - `lib/json.ts`：ロードマップとフィードバックで共有するJSON検証
 - `lib/ratings.ts`：独立した評価基準、履歴の最新値、段階別集計
 - `lib/roadmap.ts`：表示順と次に取り組む項目
@@ -113,6 +113,7 @@ Next.js 16.4.5 App Router / TypeScript / Tailwind CSS 4 / shadcn/ui構成のRadi
 - `components/study/learning-screen.tsx`：テーマ・項目共通の学習画面
 - `components/study/learning-editor.tsx`：長文入力、4段階評価、問いのテンプレートと下書き保存
 - `components/study/record-detail.tsx`：記録の閲覧・編集・削除とAIフィードバック
+- `components/study/output-comparison.tsx`：同じ学習対象の本文比較と完成度の時系列
 - `components/study/feedback-workflow.tsx`：外部AIとのコピー・JSON取り込みの共通フロー
 - `components/study/daily-actions.tsx`：共通の2ボタン
 - `components/study/roadmap-items.tsx`：項目の展開・習得状態・編集

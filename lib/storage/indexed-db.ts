@@ -848,12 +848,21 @@ export class IndexedDBStudyRepository implements StudyRepository {
         targetId: value.targetId,
         ...input,
         note: input.note.trim(),
+        ...(input.activity === "output" && {
+          title:
+            input.title?.trim() ||
+            old?.title ||
+            (value.targetType === "theme"
+              ? theme.name
+              : (await tx.objectStore("items").get(value.targetId))!.title),
+        }),
         ...(input.activity === "deepen" && {
           question: input.question?.trim(),
-          ...(value.hypothesis !== undefined && {
-            hypothesis: value.hypothesis,
+          ...(input.hypothesis !== undefined && {
+            hypothesis: input.hypothesis,
           }),
-          ...(value.insight !== undefined && { insight: value.insight }),
+          ...(input.unknowns !== undefined && { unknowns: input.unknowns }),
+          ...(input.insight !== undefined && { insight: input.insight }),
         }),
         studiedAt: old?.studiedAt ?? now,
         createdAt: old?.createdAt ?? old?.studiedAt ?? now,
