@@ -108,14 +108,30 @@ export function RecordDetail({
         <dl className="deepening-content">
           <dt>{questionKinds[record.questionKind ?? "why"]}</dt>
           <dd>{record.question}</dd>
-          <dt>自分の仮説</dt>
-          <dd>{record.hypothesis}</dd>
-          <dt>新たな気づき</dt>
-          <dd>{record.insight || "まだ記録していません。"}</dd>
         </dl>
       ) : (
         <p className="record-full-text">{record.note}</p>
       )}
+      {record.activity === "deepen" &&
+        (record.hypothesis || record.insight) && (
+          <details className="learning-goal">
+            <summary>以前の仮説・気づき</summary>
+            <dl className="deepening-content">
+              {record.hypothesis && (
+                <>
+                  <dt>自分の仮説</dt>
+                  <dd>{record.hypothesis}</dd>
+                </>
+              )}
+              {record.insight && (
+                <>
+                  <dt>新たな気づき</dt>
+                  <dd>{record.insight}</dd>
+                </>
+              )}
+            </dl>
+          </details>
+        )}
       {record.activity === "output" && (
         <p className="record-evaluation">
           今回の完成度 · {outputLabel(record.outputRating)}
@@ -130,7 +146,7 @@ export function RecordDetail({
             記録を編集
           </Button>
           {(record.activity === "output" ||
-            (record.question?.trim() && record.hypothesis?.trim())) && (
+            (record.question ?? record.note).trim()) && (
             <FeedbackWorkflow
               record={record}
               theme={theme}

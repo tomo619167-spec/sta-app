@@ -6,6 +6,8 @@ import {
   recordRevision,
   learningDraftKey,
   questionKinds,
+  questionTemplate,
+  type QuestionKind,
   validateLearningInput,
   type LearningKind,
 } from "@/lib/learning";
@@ -45,12 +47,35 @@ export function LearningEditor({
           learningDraftKey(activity, target, record?.id),
         ),
       save: (value) => studyRepository.saveLearningDraft(value),
-      initial: () => initialLearningDraft(themeId, target, activity, record),
+      initial: () => {
+        const draft = initialLearningDraft(themeId, target, activity, record);
+        if (activity === "deepen" && !record)
+          draft.question = questionTemplate("definition", name);
+        return draft;
+      },
     },
   );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const lock = useRef(false);
+  const [suggestedKind, setSuggestedKind] = useState<QuestionKind>();
+  function applyKind(kind: QuestionKind, question: string) {
+    state.update({ questionKind: kind, question });
+    setSuggestedKind(undefined);
+    setError("");
+  }
+  function chooseKind(kind: QuestionKind) {
+    const question = state.data?.question ?? "";
+    const currentKind = state.data?.questionKind;
+    if (
+      !question.trim() ||
+      (currentKind && question === questionTemplate(currentKind, name))
+    ) {
+      applyKind(kind, questionTemplate(kind, name));
+    } else {
+      setSuggestedKind(kind);
+    }
+  }
   async function save(ai = false) {
     if (!state.data || lock.current) return;
     if (stale) {
@@ -76,7 +101,7 @@ export function LearningEditor({
     } catch (error) {
       setError(
         error instanceof Error &&
-          /学習|記録|文字|問い|仮説|完成度/.test(error.message)
+          /学習|記録|文字|問い|完成度/.test(error.message)
           ? error.message
           : "保存できませんでした。入力を残しています。",
       );
@@ -180,17 +205,43 @@ export function LearningEditor({
                         name="question-kind"
                         value={key}
                         checked={value.questionKind === key}
-                        onChange={() =>
-                          state.update({
-                            questionKind: key as keyof typeof questionKinds,
-                          })
-                        }
+                        onChange={() => chooseKind(key as QuestionKind)}
                       />
                       <span>{label}</span>
                     </label>
                   ))}
                 </div>
               </fieldset>
+              {suggestedKind && (
+                <div
+                  className="workflow-footer"
+                  role="group"
+                  aria-label="テンプレートの確認"
+                >
+                  <p>{questionTemplate(suggestedKind, name)}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() =>
+                      applyKind(
+                        suggestedKind,
+                        questionTemplate(suggestedKind, name),
+                      )
+                    }
+                  >
+                    テンプレートで置き換える
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() =>
+                      applyKind(suggestedKind, value.question ?? "")
+                    }
+                  >
+                    文章を残して種類だけ変える
+                  </Button>
+                </div>
+              )}
               <div>
                 <label htmlFor="deep-question">自分で考えた問い</label>
                 <textarea
@@ -200,34 +251,6 @@ export function LearningEditor({
                   value={value.question}
                   onChange={(event) =>
                     state.update({ question: event.target.value })
-                  }
-                />
-              </div>
-              <div>
-                <label htmlFor="deep-hypothesis">自分の仮説</label>
-                <textarea
-                  id="deep-hypothesis"
-                  rows={7}
-                  maxLength={15000}
-                  value={value.hypothesis}
-                  onChange={(event) =>
-                    state.update({ hypothesis: event.target.value })
-                  }
-                  placeholder="まず、自分ではどう考えますか。"
-                />
-              </div>
-              <div>
-                <label htmlFor="deep-insight">
-                  新たな気づき{" "}
-                  <span className="optional-label">あとからでも</span>
-                </label>
-                <textarea
-                  id="deep-insight"
-                  rows={5}
-                  maxLength={15000}
-                  value={value.insight}
-                  onChange={(event) =>
-                    state.update({ insight: event.target.value })
                   }
                 />
               </div>

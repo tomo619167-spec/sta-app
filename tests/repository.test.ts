@@ -1345,20 +1345,22 @@ test("deepening partial drafts resume, edits retain the original date and output
     ...initialLearningDraft(theme.id, itemTarget, "deepen"),
     questionKind: "whatif" as const,
     question: "もし条件が違ったら？",
-    hypothesis: "",
   };
   await repo.saveLearningDraft(partial);
   await repo.close();
   assert.deepEqual(await repo.getLearningDraft(partial.key), partial);
-  await assert.rejects(repo.saveLearningRecord(partial), /仮説/);
+  await assert.rejects(
+    repo.saveLearningRecord({ ...partial, question: "" }),
+    /問い/,
+  );
   const first = await repo.saveLearningRecord({
     ...partial,
-    hypothesis: "まず自分で考えた仮説",
-    insight: "",
+    hypothesis: "旧下書きの仮説",
+    insight: "旧下書きの気づき",
   });
   const edit = {
     ...initialLearningDraft(theme.id, itemTarget, "deepen", first),
-    insight: "学び直した自分の気づき",
+    question: "もし別の条件が揃ったら？",
   };
   await repo.saveLearningDraft(edit);
   const updated = await repo.saveLearningRecord(edit);
@@ -1366,10 +1368,20 @@ test("deepening partial drafts resume, edits retain the original date and output
   assert.equal(updated.createdAt, first.createdAt);
   assert.equal(updated.studiedAt, first.studiedAt);
   assert.ok(updated.updatedAt! > first.updatedAt!);
-  assert.equal(updated.insight, edit.insight);
+  assert.equal(updated.question, edit.question);
+  assert.equal(updated.note, edit.question);
+  assert.equal(updated.hypothesis, "旧下書きの仮説");
+  assert.equal(updated.insight, "旧下書きの気づき");
+  const another = await repo.saveLearningRecord({
+    ...partial,
+    question: "別の問い？",
+  });
+  assert.notEqual(another.id, first.id);
+  assert.equal(another.hypothesis, undefined);
+  assert.equal(another.insight, undefined);
   assert.equal(updated.outputRating, undefined);
   assert.equal(await repo.getLearningDraft(edit.key), undefined);
-  assert.equal((await repo.listRecords()).length, 1);
+  assert.equal((await repo.listRecords()).length, 2);
   assert.deepEqual(await repo.listMasteryHistory(), []);
 });
 test("failed learning save rolls back record, theme timestamp and draft removal together", async () => {
@@ -1449,8 +1461,6 @@ test("both feedback prompts produce the exact versioned schema and reject malfor
       ...initialLearningDraft(theme.id, itemTarget, activity),
       note: "自分で説明",
       question: "なぜ？",
-      hypothesis: "自分の仮説",
-      insight: "",
     });
     const prompt = buildFeedbackPrompt(record, theme, "世界史", item);
     const document = parseFeedbackJSON(prompt.split("\n\n").at(-1)!);
@@ -1458,10 +1468,24 @@ test("both feedback prompts produce the exact versioned schema and reject malfor
     assertFeedbackContext(document, record);
     assert.match(prompt, /不確実/);
     assert.match(prompt, /1〜3/);
+    if (activity === "deepen") {
+      assert.equal(document.version, 2);
+      assert.match(prompt, /定義・本質・具体例/);
+      assert.doesNotMatch(prompt, /自分の仮説|自分の気づき/);
+      assert.deepEqual(
+        parseFeedbackJSON(JSON.stringify(feedbackExample(record, 1))),
+        feedbackExample(record, 1),
+      );
+      assert.throws(
+        () =>
+          parseFeedbackJSON(JSON.stringify({ ...document, explanation: "" })),
+        /explanation/,
+      );
+    }
     for (const source of [
       "{",
       "```json\n{}\n```",
-      JSON.stringify({ ...document, version: 2 }),
+      JSON.stringify({ ...document, version: 3 }),
       JSON.stringify({ ...document, questions: [] }),
       JSON.stringify({ ...document, questions: ["a", "b", "c", "d"] }),
       JSON.stringify({ ...document, uncertainty: undefined }),
@@ -1510,7 +1534,7 @@ test("AI feedback keeps its original snapshot, remains separate from insight and
   assert.equal(await repo.getFeedbackDraft(record.id), undefined);
   const edited = await repo.saveLearningRecord({
     ...initialLearningDraft(theme.id, itemTarget, "deepen", record),
-    insight: "編集した自分の気づき",
+    question: "別の問い？",
   });
   await assert.rejects(
     repo.importFeedback(record.id, JSON.stringify(feedbackExample(record))),
@@ -1520,7 +1544,8 @@ test("AI feedback keeps its original snapshot, remains separate from insight and
     (await repo.listFeedbacks())[0].snapshot.insight,
     "自分の気づき",
   );
-  assert.equal(edited.insight, "編集した自分の気づき");
+  assert.equal(edited.insight, "自分の気づき");
+  assert.equal(edited.question, "別の問い？");
   const output = await repo.saveLearningRecord({
     ...initialLearningDraft(theme.id, itemTarget, "output"),
     note: "本文",

@@ -1,6 +1,7 @@
 import type { FourLevel, StudyRecord, StudyTarget } from "./model";
 import { validateFourLevel } from "./ratings";
 export const questionKinds = {
+  definition: "そもそも何？",
   why: "なぜ？",
   how: "どうやって？",
   compare: "何が違う？",
@@ -8,6 +9,17 @@ export const questionKinds = {
   whatif: "もし〜だったら？",
 } as const;
 export type QuestionKind = keyof typeof questionKinds;
+export function questionTemplate(kind: QuestionKind, title: string) {
+  const templates: Record<QuestionKind, string> = {
+    definition: `${title}とは？`,
+    why: `なぜ「${title}」が重要なのか？`,
+    how: `${title}はどのような仕組みなのか？`,
+    compare: `${title}と△△は何が違う？`,
+    connect: `${title}は△△とどう関係する？`,
+    whatif: `もし△△だったら、${title}はどうなる？`,
+  };
+  return templates[kind];
+}
 export type LearningKind = "output" | "deepen";
 export interface LearningInput {
   activity: LearningKind;
@@ -15,8 +27,6 @@ export interface LearningInput {
   outputRating?: FourLevel;
   questionKind?: QuestionKind;
   question?: string;
-  hypothesis?: string;
-  insight?: string;
 }
 export interface OutputRecord extends StudyRecord {
   activity: "output";
@@ -27,8 +37,6 @@ export interface DeepeningRecord extends StudyRecord {
   activity: "deepen";
   questionKind: QuestionKind;
   question: string;
-  hypothesis: string;
-  insight: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -40,6 +48,9 @@ export interface LearningDraft extends LearningInput {
   targetId: string;
   recordId?: string;
   baseRevision?: string;
+  /** Read-only content carried over from older drafts. */
+  hypothesis?: string;
+  insight?: string;
 }
 export type OutputDraft = LearningDraft & { activity: "output" };
 export type DeepeningDraft = LearningDraft & { activity: "deepen" };
@@ -67,11 +78,10 @@ export function initialLearningDraft(
     activity,
     note: record?.note ?? "",
     outputRating: record?.outputRating,
-    questionKind: record?.questionKind ?? "why",
-    question: record?.question ?? "",
-    hypothesis:
-      record?.hypothesis ?? (activity === "deepen" ? (record?.note ?? "") : ""),
-    insight: record?.insight ?? "",
+    ...(activity === "deepen" && {
+      questionKind: record?.questionKind ?? "definition",
+      question: record?.question ?? record?.note ?? "",
+    }),
   };
 }
 function limited(value: unknown, label: string, max: number, required = false) {
@@ -102,13 +112,12 @@ export function validateLearningInput(
     };
   if (!Object.hasOwn(questionKinds, input.questionKind ?? ""))
     throw new Error("問いの種類を選んでください。");
+  const question = limited(input.question, "問い", 2000, !draft);
   return {
     activity: "deepen",
-    note: limited(input.note, "学習内容", 40000),
+    note: question,
     questionKind: input.questionKind,
-    question: limited(input.question, "問い", 2000, !draft),
-    hypothesis: limited(input.hypothesis, "仮説", 15000, !draft),
-    insight: limited(input.insight, "気づき", 15000),
+    question,
   };
 }
 export function validateLearningDraft(draft: LearningDraft) {
@@ -131,7 +140,12 @@ export function validateLearningDraft(draft: LearningDraft) {
       )
   )
     throw new Error("下書きの対象を確認してください。");
-  return { ...draft, ...validateLearningInput(draft, true) };
+  validateLearningInput(draft, true);
+  if (draft.hypothesis !== undefined)
+    limited(draft.hypothesis, "以前の仮説", 15000);
+  if (draft.insight !== undefined)
+    limited(draft.insight, "以前の気づき", 15000);
+  return draft;
 }
 export function recordRevision(record: StudyRecord) {
   return record.updatedAt ?? record.studiedAt;

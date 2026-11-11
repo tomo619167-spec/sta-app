@@ -3,10 +3,12 @@ export function JSONSource({
   value,
   onChange,
   example,
+  version = 1,
 }: {
   value: string;
   onChange: (value: string) => void;
   example: unknown;
+  version?: 1 | 2;
 }) {
   return (
     <>
@@ -26,7 +28,7 @@ export function JSONSource({
         />
       </div>
       <details className="json-format">
-        <summary>受け付けるJSON形式（version 1）</summary>
+        <summary>受け付けるJSON形式（version {version}）</summary>
         <pre>{JSON.stringify(example, null, 2)}</pre>
       </details>
     </>
