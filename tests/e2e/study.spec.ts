@@ -234,10 +234,17 @@ test("3.6 all explanation modes share JSON import and persist mode and source ac
     ).toBeVisible();
     await expect(
       page.getByRole("region", { name: "自分の問い", exact: true }),
-    ).toHaveText("自分の問い需要と供給とは？");
+    ).toHaveCount(0);
     await expect(
-      page.locator(".feedback-prompt-disclosure"),
-    ).not.toHaveAttribute("open");
+      page.getByText("プロンプト全文を確認", { exact: true }),
+    ).toHaveCount(0);
+    await expect(page.locator(".feedback-prompt-disclosure")).toHaveCount(0);
+    const promptBox = page.getByRole("textbox", {
+      name: "プロンプト全文",
+      exact: true,
+    });
+    await expect(promptBox).toBeVisible();
+    await expect(promptBox).toHaveAttribute("readonly", "");
     await expect(
       page.getByRole("button", { name: "プロンプトを選択", exact: true }),
     ).toHaveCount(0);
@@ -260,14 +267,24 @@ test("3.6 all explanation modes share JSON import and persist mode and source ac
     await page.screenshot({
       path: test.info().outputPath(`prompt-mode-${index}.png`),
     });
-    await activate(page.locator(".feedback-prompt-disclosure summary"));
-    await expect(
-      page.getByLabel("プロンプト全文", { exact: true }),
-    ).toBeVisible();
-    await expect(
-      page.getByLabel("プロンプト全文", { exact: true }),
-    ).toHaveValue(prompt);
-    await activate(page.locator(".feedback-prompt-disclosure summary"));
+    await expect(promptBox).toHaveValue(prompt);
+    const layout = await promptBox.evaluate((element) => {
+      const box = element as HTMLTextAreaElement;
+      const rect = box.getBoundingClientRect();
+      box.scrollTop = box.scrollHeight;
+      return {
+        height: rect.height,
+        left: rect.left,
+        right: rect.right,
+        viewport: window.innerWidth,
+        scrolls: box.scrollTop > 0 && box.scrollHeight > box.clientHeight,
+      };
+    });
+    expect(layout.height).toBeGreaterThanOrEqual(160);
+    expect(layout.height).toBeLessThanOrEqual(220);
+    expect(layout.left).toBeGreaterThanOrEqual(0);
+    expect(layout.right).toBeLessThanOrEqual(layout.viewport);
+    expect(layout.scrolls).toBe(true);
     await activate(
       page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
     );
@@ -320,6 +337,8 @@ test("3.6 all explanation modes share JSON import and persist mode and source ac
     await activate(
       page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
     );
+    // Finish the return navigation before starting the next mode's round trip.
+    await expect(page).toHaveURL(themeUrl);
   }
 });
 

@@ -75,7 +75,6 @@ export function FeedbackWorkflow({
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
   const lock = useRef(false);
-  const [promptOpen, setPromptOpen] = useState(false);
   const started = useRef(false);
   useEffect(() => {
     if (autoOpen && data && !started.current) {
@@ -101,9 +100,8 @@ export function FeedbackWorkflow({
       await navigator.clipboard.writeText(data.prompt);
       update({ copied: true });
     } catch {
-      setPromptOpen(true);
       setError(
-        "コピーできませんでした。プロンプト全文を開き、端末のコピー操作を使ってください。",
+        "コピーできませんでした。表示中のプロンプトを選択し、端末のコピー操作を使ってください。",
       );
     } finally {
       setBusy(false);
@@ -327,31 +325,18 @@ export function FeedbackWorkflow({
                   disabled={busy}
                 />
               )}
-              {record.activity === "deepen" && (
-                <section className="feedback-question" aria-label="自分の問い">
-                  <span>自分の問い</span>
-                  <p>{record.question ?? record.note}</p>
-                </section>
-              )}
+              <textarea
+                aria-label="プロンプト全文"
+                value={data.prompt}
+                readOnly
+                spellCheck={false}
+                className="json-source feedback-prompt"
+              />
               {data.copied && (
                 <p role="status" aria-label="コピー状況">
                   コピーしました
                 </p>
               )}
-              <details
-                className="feedback-prompt-disclosure"
-                open={promptOpen}
-                onToggle={(event) => setPromptOpen(event.currentTarget.open)}
-              >
-                <summary>プロンプト全文を確認</summary>
-                <textarea
-                  aria-label="プロンプト全文"
-                  value={data.prompt}
-                  readOnly
-                  rows={12}
-                  className="json-source"
-                />
-              </details>
             </>
           ) : preview ? (
             <FeedbackBody document={preview} />
