@@ -10,6 +10,8 @@ import {
   parseFeedbackJSON,
   assertFeedbackContext,
   type FeedbackDocument,
+  promptStyles,
+  type PromptStyle,
 } from "@/lib/learning-feedback";
 import { studyRepository } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
@@ -21,6 +23,8 @@ import { FeedbackBody } from "./feedback-body";
 import { useStudy } from "./provider";
 import { SavedActions } from "./saved-actions";
 import type { FeedbackDraft } from "@/lib/learning-feedback";
+import { themeHref } from "@/lib/learning-context";
+import { SegmentedControl } from "./segmented-control";
 export interface DraftFeedbackSession {
   key: string;
   load: () => Promise<FeedbackDraft | undefined>;
@@ -37,6 +41,8 @@ export function FeedbackWorkflow({
   autoOpen = false,
   draftSession,
   onSaved,
+  stayOnPage = false,
+  resumeOnMount = true,
 }: {
   record: StudyRecord;
   theme: Theme;
@@ -45,15 +51,19 @@ export function FeedbackWorkflow({
   autoOpen?: boolean;
   draftSession?: DraftFeedbackSession;
   onSaved?: () => void;
+  stayOnPage?: boolean;
+  resumeOnMount?: boolean;
 }) {
   const router = useRouter();
   const { refresh } = useStudy();
   const prompt = buildFeedbackPrompt(record, theme, subject, item);
   const state = usePersistentDraft(draftSession?.key ?? record.id, {
-    load: () =>
-      draftSession
-        ? draftSession.load()
-        : studyRepository.getFeedbackDraft(record.id),
+    load: async () => {
+      const saved = draftSession
+        ? await draftSession.load()
+        : await studyRepository.getFeedbackDraft(record.id);
+      return saved && !resumeOnMount ? { ...saved, active: false } : saved;
+    },
     save: (value) =>
       draftSession
         ? draftSession.save(value)
@@ -132,7 +142,7 @@ export function FeedbackWorkflow({
       else {
         if (onSaved) onSaved();
         else setCompleted(true);
-        router.replace(`/records/${record.id}`);
+        if (!stayOnPage) router.replace(`/records/${record.id}`);
       }
     } catch (error) {
       setError(
@@ -146,11 +156,28 @@ export function FeedbackWorkflow({
       setBusy(false);
     }
   }
-  function close() {
-    update({ active: false });
+  async function close() {
+    setBusy(true);
     setError("");
-    if (draftSession) draftSession.onClose();
-    else if (autoOpen) router.replace(`/records/${record.id}`);
+    try {
+      if (!draftSession) update({ active: false });
+      await state.flush();
+      if (draftSession) draftSession.onClose();
+      else router.replace(themeHref(theme.id), { scroll: false });
+    } catch {
+      setError("下書きを保存できませんでした。再試行してから閉じてください。");
+    } finally {
+      setBusy(false);
+    }
+  }
+  function changeStyle(style: PromptStyle) {
+    update({
+      style,
+      formatVersion: record.activity === "deepen" ? 3 : 1,
+      prompt: buildFeedbackPrompt(record, theme, subject, item, style),
+      copied: false,
+    });
+    setError("");
   }
   return (
     <>
@@ -181,7 +208,7 @@ export function FeedbackWorkflow({
       )}
       <EditorDialog
         open={data?.active ?? false}
-        onClose={close}
+        onClose={() => void close()}
         title={
           record.activity === "output"
             ? "外部AIでフィードバック"
@@ -195,7 +222,9 @@ export function FeedbackWorkflow({
                 setError("");
                 update({ step: data?.step === "preview" ? "json" : "prompt" });
               }
-            : undefined
+            : draftSession
+              ? () => update({ active: false })
+              : undefined
         }
         error={error || previewError}
         saveLabel={
@@ -214,7 +243,17 @@ export function FeedbackWorkflow({
               onClick={(event) => {
                 event.preventDefault();
                 state.update({
-                  ...initialFeedbackDraft(record, prompt),
+                  ...initialFeedbackDraft(
+                    record,
+                    buildFeedbackPrompt(
+                      record,
+                      theme,
+                      subject,
+                      item,
+                      data?.style ?? "simple",
+                    ),
+                  ),
+                  style: data?.style ?? "simple",
                   active: true,
                 });
                 setError("");
@@ -270,6 +309,15 @@ export function FeedbackWorkflow({
             </p>
           ) : data?.step === "prompt" ? (
             <>
+              {record.activity === "deepen" && (
+                <SegmentedControl
+                  label="説明スタイル"
+                  value={data.style ?? "simple"}
+                  options={promptStyles}
+                  onChange={changeStyle}
+                  disabled={busy}
+                />
+              )}
               <p className="roadmap-hint">
                 外部AIへ貼り付け、返ってきたJSONを取り込みます。
               </p>

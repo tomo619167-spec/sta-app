@@ -12,10 +12,12 @@ export function RoadmapWorkflow({
   theme,
   subject,
   onImported,
+  onClose,
 }: {
   theme: Theme;
   subject: string;
   onImported: (count: number) => void;
+  onClose?: () => void;
 }) {
   const state = useRoadmapDraft(theme);
   const { draft, update } = state;
@@ -98,6 +100,16 @@ export function RoadmapWorkflow({
             : "conditions",
     });
   }
+  async function close() {
+    setError("");
+    try {
+      update({ active: false });
+      await state.flush();
+      onClose?.();
+    } catch {
+      setError("下書きを保存できませんでした。再試行してから閉じてください。");
+    }
+  }
   return (
     <>
       <div
@@ -131,7 +143,7 @@ export function RoadmapWorkflow({
       )}
       <EditorDialog
         open={draft?.active ?? false}
-        onClose={() => change({ active: false })}
+        onClose={() => void close()}
         title="AIでロードマップを作成"
         onSubmit={submit}
         busy={busy}

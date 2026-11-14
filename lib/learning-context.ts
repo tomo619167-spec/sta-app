@@ -31,7 +31,10 @@ export function resolveTarget(
     : undefined;
 }
 export function roadmapHref(themeId: string, itemId?: string) {
-  return `/themes/${encodeURIComponent(themeId)}/roadmap${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}`}`;
+  return `/themes/${encodeURIComponent(themeId)}/roadmap/edit${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}`}`;
+}
+export function learningListHref(themeId: string, target?: StudyTarget) {
+  return themeHref(themeId, target?.type === "item" ? target.id : undefined);
 }
 export function examHref(subjectId: string, themeId?: string) {
   return `/subjects/${encodeURIComponent(subjectId)}/past-exams${themeId === undefined ? "" : `?theme=${encodeURIComponent(themeId)}`}`;

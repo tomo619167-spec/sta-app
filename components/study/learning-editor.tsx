@@ -130,7 +130,6 @@ export function LearningEditor({
       state.clear();
       await refresh();
       onSaved(saved);
-      onClose();
     } catch (error) {
       setError(
         error instanceof Error &&
@@ -141,6 +140,14 @@ export function LearningEditor({
     } finally {
       lock.current = false;
       setBusy(false);
+    }
+  }
+  async function dismiss() {
+    try {
+      await state.flush();
+      onClose();
+    } catch {
+      setError("下書きを保存できませんでした。再試行してから閉じてください。");
     }
   }
   const { refresh, themes, subjects, items } = useStudy();
@@ -233,11 +240,12 @@ export function LearningEditor({
             await state.flush();
             return studyRepository.saveLearningRecord(value, source);
           },
-          onClose: () => {},
+          onClose: () => {
+            void dismiss();
+          },
           onSaved: (saved) => {
             state.clear();
             onSaved(saved);
-            onClose();
           },
         }}
       />
@@ -246,7 +254,7 @@ export function LearningEditor({
   return (
     <EditorDialog
       open={open}
-      onClose={onClose}
+      onClose={() => void dismiss()}
       title={
         record
           ? "記録を編集"
