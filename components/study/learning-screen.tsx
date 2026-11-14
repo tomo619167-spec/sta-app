@@ -1,123 +1,95 @@
 "use client";
+import Link from "next/link";
 import { useState } from "react";
-import { PenLine, Lightbulb, Plus } from "lucide-react";
+import { PenLine, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { latestOutput, outputLabel } from "@/lib/ratings";
-import { MasteryControl } from "./mastery-control";
 import {
   resolveTarget,
-  roadmapHref,
+  studyReturnHref,
   themeHref,
   type DailyFeature,
 } from "@/lib/learning-context";
+import type { StudyRecord } from "@/lib/model";
 import { useStudy } from "./provider";
 import { BackLink, RecordList } from "./shared";
 import { LearningEditor } from "./learning-editor";
-import { useRouter } from "next/navigation";
+import { SavedActions } from "./saved-actions";
 export function LearningScreen({
   themeId,
   feature,
   itemId,
-  fromTheme = false,
 }: {
   themeId: string;
   feature: DailyFeature;
   itemId?: string;
   fromTheme?: boolean;
 }) {
-  const router = useRouter();
   const { themes, items, records } = useStudy();
-  const [open, setOpen] = useState(false);
-  const theme = themes.find((theme) => theme.id === themeId);
+  const [open, setOpen] = useState(true);
+  const [saved, setSaved] = useState<StudyRecord>();
+  const theme = themes.find((entry) => entry.id === themeId);
   const resolved = theme ? resolveTarget(theme, items, itemId) : undefined;
-  const back =
-    itemId === undefined || fromTheme
-      ? themeHref(themeId, itemId)
-      : roadmapHref(themeId, itemId);
   if (!theme || !resolved)
     return (
       <>
-        <BackLink href={theme ? roadmapHref(themeId) : "/"}>
-          {theme ? "ロードマップへ" : "ホーム"}
+        <BackLink href={theme ? themeHref(themeId) : "/"}>
+          {theme ? "テーマに戻る" : "ホーム"}
         </BackLink>
         <div className="empty-state">
           <h1>学習対象が見つかりません</h1>
         </div>
       </>
     );
-  const scoped = records.filter(
-    (record) =>
-      record.targetType === resolved.target.type &&
-      record.targetId === resolved.target.id,
+  const displayed = records.filter(
+    (entry) =>
+      entry.themeId === themeId &&
+      entry.targetType === resolved.target.type &&
+      entry.targetId === resolved.target.id &&
+      entry.activity === feature,
   );
-  const output = latestOutput(scoped, resolved.target);
-  const displayed =
-    feature === "output"
-      ? scoped.filter((record) => record.activity === "output")
-      : scoped;
-  const title = feature === "output" ? "アウトプット" : "理解を深める";
+  const title = feature === "output" ? "自分の言葉で説明する" : "理解を深める";
   const Icon = feature === "output" ? PenLine : Lightbulb;
   return (
     <>
-      <BackLink href={back}>
-        {itemId === undefined || fromTheme
-          ? "テーマに戻る"
-          : "ロードマップに戻る"}
+      <BackLink href={studyReturnHref(themeId, resolved.target)}>
+        {itemId === undefined ? "テーマに戻る" : "学習項目に戻る"}
       </BackLink>
       <header className="learning-heading">
-        <Icon size={25} strokeWidth={1.4} />
+        <Icon size={24} strokeWidth={1.4} />
         <h1>{title}</h1>
       </header>
       <section className="learning-target" aria-label="現在の学習対象">
-        <span>
-          {resolved.target.type === "theme" ? "テーマ全体" : "学習項目"}
-        </span>
+        <span>{itemId === undefined ? "テーマ全体" : "学習項目"}</span>
         <h2>{resolved.name}</h2>
-        {(resolved.item?.goal ?? theme.description) && (
-          <details className="learning-goal">
-            <summary>到達目標を確認</summary>
-            <p>{resolved.item?.goal ?? theme.description}</p>
-          </details>
-        )}
-        {feature === "output" && (
-          <div className="completion-summary">
-            <span>直近のアウトプット</span>
-            <strong>{outputLabel(output?.outputRating)}</strong>
-          </div>
-        )}
       </section>
-      <MasteryControl
-        themeId={themeId}
-        target={resolved.target}
-        name={resolved.name}
-      />
-
-      <Button onClick={() => setOpen(true)}>
-        <Plus />
-        学習を記録
-      </Button>
-      <section className="recent-section">
-        <h2>
-          {feature === "output" ? "アウトプットの履歴" : "この対象の記録"}
-        </h2>
-        {displayed.length ? (
+      {saved ? (
+        <SavedActions themeId={themeId} target={resolved.target}>
+          <Link className="text-link" href={`/records/${saved.id}`}>
+            保存した記録・外部AI
+          </Link>
+        </SavedActions>
+      ) : (
+        <Button onClick={() => setOpen(true)}>
+          {feature === "output" ? "説明を始める" : "問いを作る"}
+        </Button>
+      )}
+      {displayed.length > 0 && (
+        <section className="recent-section">
+          <h2>{feature === "output" ? "アウトプットの履歴" : "問いの履歴"}</h2>
           <RecordList records={displayed} themes={themes} items={items} />
-        ) : (
-          <p className="quiet-empty">まだ記録はありません。</p>
-        )}
-      </section>
+        </section>
+      )}
       {open && (
         <LearningEditor
-          key={`${resolved.target.type}:${resolved.target.id}:${feature}`}
           themeId={themeId}
           target={resolved.target}
           name={resolved.name}
           goal={resolved.item?.goal ?? theme.description}
           activity={feature}
-          open={open}
+          open
           onClose={() => setOpen(false)}
-          onSaved={(record, ai) => {
-            if (ai) router.push(`/records/${record.id}?ai=1`);
+          onSaved={(entry) => {
+            setSaved(entry);
           }}
         />
       )}

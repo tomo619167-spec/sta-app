@@ -1,9 +1,743 @@
 import { expect, test, type Page, type Locator } from "@playwright/test";
+import { questionTemplate, type QuestionKind } from "../../lib/learning";
 // Mobile projects exercise touch input; desktop keeps ordinary mouse clicks.
 async function activate(locator: Locator) {
   if (test.info().project.use.hasTouch) await locator.tap();
   else await locator.click();
 }
+
+async function setupItems(page: Page, names = ["原因", "影響"]) {
+  await page.goto("/");
+  await createTheme(page);
+  const themeUrl = page.url();
+  await openRoadmap(page);
+  for (const name of names) await addItem(page, name);
+  return { themeUrl, roadmapUrl: page.url() };
+}
+async function openItem(page: Page, name = "原因") {
+  await activate(page.getByRole("link", { name, exact: true }));
+  await expect(
+    page.getByRole("heading", { name, level: 1, exact: true }),
+  ).toBeVisible();
+  return page.url();
+}
+async function begin(page: Page, activity: "output" | "deepen") {
+  await activate(
+    page.getByRole("link", {
+      name: activity === "output" ? "自分の言葉で説明する" : "理解を深める",
+      exact: true,
+    }),
+  );
+  await expect(page.getByRole("dialog")).toBeVisible();
+}
+async function finishOutput(page: Page, note: string, rating?: string) {
+  await page.getByLabel("アウトプット本文", { exact: true }).fill(note);
+  if (rating)
+    await activate(page.getByRole("radio", { name: rating, exact: true }));
+  await activate(page.getByRole("button", { name: "説明を保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "保存後の操作" }),
+  ).toBeVisible();
+}
+async function rows(page: Page, store: string) {
+  return page.evaluate(
+    (name) =>
+      new Promise<Record<string, unknown>[]>((resolve, reject) => {
+        const request = indexedDB.open("yohaku-study");
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction(name);
+          const read = tx.objectStore(name).getAll();
+          tx.oncomplete = () => {
+            db.close();
+            resolve(read.result);
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+        request.onerror = () => reject(request.error);
+      }),
+    store,
+  );
+}
+async function feedbackJSON(page: Page) {
+  const prompt = await page
+    .getByLabel("生成したプロンプト", { exact: true })
+    .inputValue();
+  return { prompt, document: JSON.parse(prompt.split("\n\n").at(-1)!) };
+}
+async function clipboard(page: Page, denied = false) {
+  await page.addInitScript((fail) => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text: string) => {
+          if (fail) throw new DOMException("Denied", "NotAllowedError");
+          (window as Window & { copiedText?: string }).copiedText = text;
+        },
+      },
+    });
+  }, denied);
+}
+
+test("3.5 existing v6 records, legacy reflections, ratings and AI survive browsing and question-only edits", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  const itemUrl = await openItem(page);
+  const itemId = itemUrl.split("/").at(-1)!;
+  const themeId = themeUrl.split("/").at(-1)!;
+  await page.evaluate(
+    ({ themeId, itemId }) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("yohaku-study");
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction(
+            ["records", "learning-feedback", "mastery-history"],
+            "readwrite",
+          );
+          const date = "2026-11-01T00:00:00.000Z";
+          const base = {
+            themeId,
+            targetType: "item",
+            targetId: itemId,
+            studiedAt: date,
+            createdAt: date,
+            updatedAt: date,
+          };
+          tx.objectStore("records").add({
+            ...base,
+            id: "legacy-output",
+            activity: "output",
+            title: "以前の説明",
+            note: "旧アウトプット",
+            completion: 63,
+            outputRating: 2,
+          });
+          tx.objectStore("records").add({
+            ...base,
+            id: "legacy-question",
+            activity: "deepen",
+            note: "昔の問い",
+            question: "昔の問い",
+            questionKind: "why",
+            hypothesis: "以前の仮説",
+            unknowns: "以前の不明点",
+            insight: "以前の気づき",
+          });
+          tx.objectStore("learning-feedback").add({
+            id: "old-ai",
+            themeId,
+            recordId: "legacy-output",
+            targetType: "item",
+            targetId: itemId,
+            createdAt: date,
+            snapshot: { note: "旧アウトプット", revision: date },
+            document: {
+              version: 1,
+              kind: "output",
+              recordId: "legacy-output",
+              targetType: "item",
+              targetId: itemId,
+              revision: date,
+              strengths: ["以前のAI評価"],
+              missing: [],
+              misunderstandings: [],
+              advice: [],
+              questions: ["次の問い"],
+              uncertainty: [],
+            },
+          });
+          tx.objectStore("mastery-history").add({
+            themeId,
+            targetType: "item",
+            targetId: itemId,
+            level: 4,
+            changedAt: date,
+          });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    { themeId, itemId },
+  );
+  const stores = [
+    "subjects",
+    "themes",
+    "items",
+    "records",
+    "learning-feedback",
+    "mastery-history",
+  ];
+  const before = await Promise.all(stores.map((name) => rows(page, name)));
+  await page.reload();
+  await expect(page.locator(".mastery-control strong")).toHaveText("定着した");
+  await expect(page.locator(".record-list")).toContainText("AIフィードバック");
+  await page.goto(themeUrl);
+  await openRoadmap(page);
+  await openItem(page);
+  expect(await Promise.all(stores.map((name) => rows(page, name)))).toEqual(
+    before,
+  );
+  await page.goto("/records/legacy-output");
+  await expect(page.getByText("旧評価 63%", { exact: true })).toBeVisible();
+  await expect(page.locator(".feedback-entry")).toContainText("以前のAI評価");
+  await page.goto("/records/legacy-question");
+  await activate(page.getByText("自分の考え・気づき", { exact: true }));
+  await expect(page.getByText("以前の仮説", { exact: true })).toBeVisible();
+  await expect(page.getByText("以前の不明点", { exact: true })).toBeVisible();
+  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
+  await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
+  await page.getByLabel("自分の問い", { exact: true }).fill("編集後の問い");
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const all = await rows(page, "records");
+  expect(all.find((entry) => entry.id === "legacy-output")).toEqual(
+    before[3].find((entry) => entry.id === "legacy-output"),
+  );
+  expect(all.find((entry) => entry.id === "legacy-question")).toMatchObject({
+    question: "編集後の問い",
+    hypothesis: "以前の仮説",
+    unknowns: "以前の不明点",
+    insight: "以前の気づき",
+  });
+  expect(await rows(page, "learning-feedback")).toEqual(before[4]);
+});
+
+test("3.5 invalid item details and learning URLs return safely without changing the target to a theme", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  await page.goto(themeUrl + "/items/missing");
+  await expect(
+    page.getByRole("heading", { name: "学習項目が見つかりません" }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+  await page.goto(themeUrl + "/output?item=missing");
+  await expect(
+    page.getByRole("heading", { name: "学習対象が見つかりません" }),
+  ).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await rows(page, "records")).toHaveLength(0);
+});
+
+test("3.5 stale record edits retain the draft until the latest saved explanation is explicitly reloaded", async ({
+  page,
+}) => {
+  await setupItems(page);
+  await openItem(page);
+  await begin(page, "output");
+  await finishOutput(page, "最初の説明");
+  await activate(
+    page.getByRole("link", { name: "保存した記録・外部AI", exact: true }),
+  );
+  await expect(page).toHaveURL(/\/records\/[^/]+$/);
+  const recordId = page.url().split("/").at(-1)!;
+  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
+  await page
+    .getByLabel("アウトプット本文", { exact: true })
+    .fill("まだ保存していない編集");
+  await waitForDraft(page);
+  await page.evaluate(
+    (id) =>
+      new Promise<void>((resolve, reject) => {
+        const request = indexedDB.open("yohaku-study");
+        request.onsuccess = () => {
+          const db = request.result;
+          const tx = db.transaction("records", "readwrite");
+          const read = tx.objectStore("records").get(id);
+          read.onsuccess = () =>
+            tx.objectStore("records").put({
+              ...read.result,
+              note: "別の画面で保存された説明",
+              updatedAt: "2099-01-01T00:00:00.000Z",
+            });
+          tx.oncomplete = () => {
+            db.close();
+            resolve();
+          };
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+    recordId,
+  );
+  await page.reload();
+  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
+  await expect(page.getByRole("alert")).toContainText(
+    "別の画面で記録が更新されています",
+  );
+  await expect(
+    page.getByLabel("アウトプット本文", { exact: true }),
+  ).toHaveValue("まだ保存していない編集");
+  await activate(
+    page.getByRole("button", { name: "最新の記録から編集する", exact: true }),
+  );
+  await activate(page.getByRole("button", { name: "説明を保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.locator(".record-full-text")).toHaveText(
+    "別の画面で保存された説明",
+  );
+});
+
+test("3.5 lists show correct counts and whole-row links without menus or assessment controls", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page, [
+    "原因",
+    "影響",
+    "背景",
+    "経過",
+    "比較",
+  ]);
+  for (const [name, level] of [
+    ["原因", "説明できる"],
+    ["影響", "定着した"],
+    ["背景", "学習中"],
+  ]) {
+    await openItem(page, name);
+    await changeMastery(page, level);
+    await activate(
+      page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+    );
+    if (name !== "背景") await openRoadmap(page);
+  }
+  await expect(page).toHaveURL(themeUrl);
+  await expect(page.locator(".compact-roadmap-entry")).toContainText(
+    "説明できる・定着した：",
+  );
+  await expect(page.locator(".compact-roadmap-entry strong")).toHaveText(
+    "2 / 5",
+  );
+  await expect(page.locator(".items-preview .roadmap-item")).toHaveCount(4);
+  await expect(page.locator(".items-preview .roadmap-item button")).toHaveCount(
+    0,
+  );
+  await expect(page.locator(".items-preview .mastery-control")).toHaveCount(0);
+  await activate(
+    page.getByRole("button", { name: "すべて表示（5項目）", exact: true }),
+  );
+  await expect(page.locator(".items-preview .roadmap-item")).toHaveCount(5);
+  await page.screenshot({ path: test.info().outputPath("theme-items.png") });
+  const itemUrl = await openItem(page, "比較");
+  expect(itemUrl).toContain("/items/");
+  await page.screenshot({ path: test.info().outputPath("item-detail.png") });
+  await expect(
+    page.getByRole("navigation", { name: "項目の学習" }).getByRole("link"),
+  ).toHaveCount(2);
+  await expect(
+    page.getByRole("button", { name: "この項目を記録" }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "この項目の記録" }),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("navigation", { name: "メインナビゲーション" })
+      .getByRole("link"),
+  ).toHaveText(["ホーム"]);
+  await expect(
+    page.getByRole("navigation", { name: "メインナビゲーション" }),
+  ).not.toContainText("タイマー");
+  await activate(page.getByRole("link", { name: "設定", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "設定", level: 1 }),
+  ).toBeVisible();
+});
+
+test("3.5 item details retain edit, delete, decrease and roadmap reordering without inline menus", async ({
+  page,
+}) => {
+  const { themeUrl, roadmapUrl } = await setupItems(page, [
+    "原因",
+    "影響",
+    "背景",
+  ]);
+  await openItem(page);
+  await changeMastery(page, "定着した");
+  await changeMastery(page, "学習中");
+  await activate(
+    page.getByRole("button", { name: "学習項目のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "編集", exact: true }));
+  await page.getByLabel("学習項目", { exact: true }).fill("革命の原因");
+  await page
+    .getByRole("textbox", { name: /^到達目標/ })
+    .fill("政治・経済の背景を説明できる");
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "革命の原因", level: 1 }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(page.locator(".item-detail-goal")).toContainText("政治・経済");
+  await expect(page.locator(".mastery-control strong")).toHaveText("学習中");
+  await activate(
+    page.getByRole("link", { name: "ロードマップを管理", exact: true }),
+  );
+  await activate(page.getByRole("button", { name: "並び替え", exact: true }));
+  await activate(page.getByRole("button", { name: "背景を上へ", exact: true }));
+  await activate(
+    page.getByRole("button", { name: "並び替え完了", exact: true }),
+  );
+  await page.reload();
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["革命の原因", "背景", "影響"],
+  );
+  await openItem(page, "革命の原因");
+  await activate(
+    page.getByRole("button", { name: "学習項目のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
+  await activate(page.getByRole("button", { name: "キャンセル", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "革命の原因", level: 1 }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("button", { name: "学習項目のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
+  await activate(page.getByRole("button", { name: "削除する", exact: true }));
+  await expect(page).toHaveURL(themeUrl);
+  await page.goto(roadmapUrl);
+  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
+    ["背景", "影響"],
+  );
+});
+
+test("3.5 item output starts with two taps, restores drafts and keeps mastery separate from session rating", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  const itemUrl = await openItem(page);
+  await changeMastery(page, "学習中");
+  await begin(page, "output");
+  await expect(
+    page.getByRole("dialog", { name: "自分の言葉で説明する" }),
+  ).toBeVisible();
+  await expect(page.locator(".mastery-control")).toHaveCount(0);
+  await expect(page.locator(".completion-summary")).toHaveCount(0);
+  await page.getByLabel("タイトル", { exact: true }).fill("最初の説明");
+  await page
+    .getByLabel("アウトプット本文", { exact: true })
+    .fill("覚えていた内容。\n自分の言葉で説明する。");
+  await activate(page.getByRole("radio", { name: "十分できた", exact: true }));
+  await waitForDraft(page);
+  await page.reload();
+  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue(
+    "最初の説明",
+  );
+  await expect(
+    page.getByLabel("アウトプット本文", { exact: true }),
+  ).toHaveValue(/覚えていた内容/);
+  await finishOutput(page, "覚えていた内容。\n自分の言葉で説明する。");
+  await expect(
+    page.getByRole("link", { name: "同じ項目で続ける", exact: true }),
+  ).toHaveAttribute("href", new URL(itemUrl).pathname);
+  await activate(
+    page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+  await openItem(page);
+  await expect(page.locator(".mastery-control strong")).toHaveText("学習中");
+  await expect(page.locator(".completion-summary")).toHaveCount(0);
+  await expect(page.locator(".record-list")).toContainText("十分できた");
+  await activate(page.getByRole("link", { name: "記録を開く", exact: true }));
+  await expect(page.locator(".record-full-text")).toContainText(
+    "覚えていた内容",
+  );
+  await page.screenshot({ path: test.info().outputPath("item-record.png") });
+});
+
+test("3.5 theme output remains independent, can be unrated, compared, edited and deleted", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  await page.goto(themeUrl);
+  await begin(page, "output");
+  await finishOutput(page, "一回目", "一部できた");
+  await activate(
+    page.getByRole("link", { name: "テーマ詳細へ戻る", exact: true }),
+  );
+  await begin(page, "output");
+  await finishOutput(page, "二回目は未評価");
+  const records = await rows(page, "records");
+  expect(records).toHaveLength(2);
+  expect(
+    records.filter((entry) => entry.outputRating === undefined),
+  ).toHaveLength(1);
+  await activate(
+    page.getByRole("link", { name: "保存した記録・外部AI", exact: true }),
+  );
+  await activate(page.getByText("過去のアウトプットと比べる", { exact: true }));
+  await expect(
+    page.getByRole("region", { name: "比較する本文" }),
+  ).toContainText("一回目");
+  await expect(page.getByRole("list", { name: "完成度の履歴" })).toContainText(
+    "一部できた",
+  );
+  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
+  await page
+    .getByLabel("アウトプット本文", { exact: true })
+    .fill("編集した説明");
+  await activate(page.getByRole("button", { name: "説明を保存", exact: true }));
+  await expect(
+    page.getByRole("region", { name: "保存後の操作" }),
+  ).toBeVisible();
+  await expect(page.locator(".record-full-text")).toHaveText("編集した説明");
+  await activate(
+    page.getByRole("button", { name: "記録のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
+  await activate(page.getByRole("button", { name: "削除する", exact: true }));
+  await expect(page).toHaveURL(/\/history/);
+  expect(await rows(page, "records")).toHaveLength(1);
+});
+
+test("3.5 six question templates use one editable input and saving is independent of AI", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  await openItem(page);
+  await begin(page, "deepen");
+  await expect(page.locator(".mastery-control")).toHaveCount(0);
+  await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
+  const question = page.getByLabel("自分の問い", { exact: true });
+  for (const [kind, label] of [
+    ["definition", "そもそも何？"],
+    ["why", "なぜ？"],
+    ["how", "どうやって？"],
+    ["compare", "何が違う？"],
+    ["connect", "何とつながる？"],
+    ["whatif", "もし〜だったら？"],
+  ]) {
+    await activate(page.getByRole("radio", { name: label, exact: true }));
+    await expect(question).toHaveValue(
+      questionTemplate(kind as QuestionKind, "原因"),
+    );
+  }
+  await question.fill("税負担と背景はどう関係する？");
+  await activate(page.getByRole("radio", { name: "なぜ？", exact: true }));
+  await expect(question).toHaveValue("税負担と背景はどう関係する？");
+  await activate(
+    page.getByRole("button", {
+      name: "文章を残して種類だけ変える",
+      exact: true,
+    }),
+  );
+  await waitForDraft(page);
+  await page.reload();
+  await expect(question).toHaveValue("税負担と背景はどう関係する？");
+  await expect(
+    page.getByRole("button", { name: "学習を保存", exact: true }),
+  ).toHaveCount(0);
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  expect(await rows(page, "records")).toHaveLength(1);
+  expect(await rows(page, "learning-feedback")).toHaveLength(0);
+  await activate(
+    page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+});
+
+test("3.5 unsaved question AI copies, resumes and imports JSON atomically with clear next steps", async ({
+  page,
+}) => {
+  await clipboard(page);
+  const { themeUrl } = await setupItems(page, ["需要と供給"]);
+  await openItem(page, "需要と供給");
+  await begin(page, "deepen");
+  await activate(
+    page.getByRole("button", { name: "プロンプトを確認", exact: true }),
+  );
+  const { prompt, document } = await feedbackJSON(page);
+  expect(prompt).toContain("需要と供給とは？");
+  expect(prompt).toContain("簡潔な定義");
+  expect(await rows(page, "records")).toHaveLength(0);
+  await activate(
+    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
+  );
+  await expect(page.getByRole("status", { name: "コピー状況" })).toHaveText(
+    "コピーしました",
+  );
+  await expect(page.getByLabel("JSON", { exact: true })).toHaveCount(0);
+  await activate(
+    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+  );
+  await page.getByLabel("JSON", { exact: true }).fill("{");
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await expect(page.getByRole("alert")).toContainText("構文");
+  document.explanation = "<img src=x onerror=alert(1)>も文字として扱う";
+  await page.getByLabel("JSON", { exact: true }).fill(JSON.stringify(document));
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await waitForDraft(page);
+  await page.reload();
+  await expect(page.locator(".feedback-body")).toContainText(
+    document.explanation,
+  );
+  await expect(page.locator(".feedback-body img")).toHaveCount(0);
+  expect(await rows(page, "records")).toHaveLength(0);
+  await activate(
+    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await rows(page, "records")).toHaveLength(1);
+  expect(await rows(page, "learning-feedback")).toHaveLength(1);
+  expect(await rows(page, "learning-drafts")).toHaveLength(0);
+  await expect(
+    page.getByRole("link", { name: "同じ項目で続ける", exact: true }),
+  ).toBeVisible();
+  await activate(
+    page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+  await openItem(page, "需要と供給");
+  await expect(page.locator(".record-list")).toContainText("AIフィードバック");
+  await activate(page.getByRole("link", { name: "すべて見る", exact: true }));
+  await expect(
+    page.getByLabel("学習項目で絞り込む", { exact: true }),
+  ).not.toHaveValue("");
+  await page.getByLabel("記録の種類", { exact: true }).selectOption("feedback");
+  await expect(page.locator(".record-list li")).toHaveCount(1);
+});
+
+test("3.5 cancel and failed AI registration keep drafts and let the question be saved on its own", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const add = IDBObjectStore.prototype.add;
+    IDBObjectStore.prototype.add = function (
+      ...args: Parameters<IDBObjectStore["add"]>
+    ) {
+      if (this.name === "learning-feedback")
+        throw new DOMException("Quota", "QuotaExceededError");
+      return add.apply(this, args);
+    };
+  });
+  await setupItems(page);
+  await openItem(page);
+  await begin(page, "deepen");
+  await activate(
+    page.getByRole("button", { name: "プロンプトを確認", exact: true }),
+  );
+  const { document } = await feedbackJSON(page);
+  await activate(
+    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+  );
+  await page.getByLabel("JSON", { exact: true }).fill(JSON.stringify(document));
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await activate(
+    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
+  );
+  await expect(page.getByRole("alert")).toContainText("取り込めません");
+  expect(await rows(page, "records")).toHaveLength(0);
+  expect(await rows(page, "learning-feedback")).toHaveLength(0);
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(page.getByLabel("自分の問い", { exact: true })).toHaveValue(
+    "原因とは？",
+  );
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  expect(await rows(page, "records")).toHaveLength(1);
+  expect(await rows(page, "learning-feedback")).toHaveLength(0);
+});
+
+test("3.5 saved output feedback checks identity and supports manual copy without changing ratings", async ({
+  page,
+}) => {
+  await clipboard(page, true);
+  const { themeUrl } = await setupItems(page);
+  await openItem(page);
+  await changeMastery(page, "学習中");
+  await begin(page, "output");
+  await finishOutput(page, "原因を説明した", "概ねできた");
+  await activate(
+    page.getByRole("link", { name: "保存した記録・外部AI", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "外部AIでフィードバック", exact: true }),
+  );
+  const { document } = await feedbackJSON(page);
+  await activate(
+    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
+  );
+  await expect(page.getByRole("alert")).toContainText("コピーできません");
+  await activate(
+    page.getByRole("button", { name: "プロンプトを選択", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+  );
+  await page
+    .getByLabel("JSON", { exact: true })
+    .fill(JSON.stringify({ ...document, targetId: "other" }));
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await expect(page.getByRole("alert")).toContainText("一致しません");
+  await page.getByLabel("JSON", { exact: true }).fill(JSON.stringify(document));
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await activate(
+    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
+  );
+  await expect(
+    page.getByRole("region", { name: "保存後の操作" }),
+  ).toBeVisible();
+  expect((await rows(page, "records"))[0].outputRating).toBe(3);
+  expect((await rows(page, "mastery-history"))[0].level).toBe(2);
+  await activate(
+    page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+});
+
+test("3.5 both editors stay scrollable at 320px above a shrunken and panned keyboard viewport", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  await page.setViewportSize({ width: 320, height: 640 });
+  for (const activity of ["output", "deepen"] as const) {
+    await page.goto(themeUrl);
+    await begin(page, activity);
+    await page.evaluate(() => {
+      Object.defineProperty(visualViewport!, "height", {
+        configurable: true,
+        get: () => 320,
+      });
+      Object.defineProperty(visualViewport!, "offsetTop", {
+        configurable: true,
+        get: () => 50,
+      });
+      visualViewport!.dispatchEvent(new Event("resize"));
+    });
+    await expect(page.getByRole("dialog")).toHaveCSS("height", "320px");
+    await page
+      .getByLabel(activity === "output" ? "アウトプット本文" : "自分の問い", {
+        exact: true,
+      })
+      .fill("覚えていること\n".repeat(activity === "output" ? 100 : 10));
+    const save = page.getByRole("button", {
+      name: activity === "output" ? "説明を保存" : "問いを保存",
+      exact: true,
+    });
+    await expect(save).toBeInViewport();
+    const box = (await save.boundingBox())!;
+    expect(box.y + box.height).toBeLessThanOrEqual(370);
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath(`keyboard-${activity}.png`),
+    });
+    await activate(save);
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  }
+});
 async function createTheme(
   page: Page,
   name = "フランス革命",
@@ -88,178 +822,7 @@ test("subject selection, rename, duplicate prevention and subject reassignment p
   await page.reload();
   await expect(page.locator(".subject-label")).toHaveText("歴史");
 });
-test("roadmap items, records, learning entries and confirmed deletion persist", async ({
-  page,
-}) => {
-  const errors: string[] = [];
-  page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto("/");
-  await createTheme(page);
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await activate(page.getByRole("button", { name: "項目を追加" }));
-  await page
-    .getByRole("textbox", { name: "学習項目", exact: true })
-    .fill("革命が起きた原因");
-  await page
-    .getByRole("textbox", { name: /^到達目標/ })
-    .fill("原因を自分の言葉で説明できる");
-  await activate(page.getByRole("button", { name: "保存", exact: true }));
-  await activate(
-    page.getByRole("button", { name: "革命が起きた原因", exact: true }),
-  );
-  await expect(page.getByText("原因を自分の言葉で説明できる")).toBeVisible();
-  await changeMastery(page, "定着した");
-  await expect(
-    page.getByRole("img", { name: /フランス革命の習得状況/ }),
-  ).toHaveAttribute("aria-label", /定着した 1項目/);
-  await activate(
-    page.getByRole("button", { name: "革命が起きた原因のメニュー" }),
-  );
-  await activate(page.getByRole("menuitem", { name: "編集", exact: true }));
-  await page
-    .getByRole("textbox", { name: "学習項目", exact: true })
-    .fill("身分制と財政難");
-  await expect(page.getByRole("textbox", { name: /^到達目標/ })).toHaveValue(
-    "原因を自分の言葉で説明できる",
-  );
-  await activate(page.getByRole("button", { name: "保存", exact: true }));
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await page.getByLabel("学習内容").fill("三部会の役割を整理した。");
-  await activate(page.getByRole("button", { name: "学習を保存" }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.getByText("三部会の役割を整理した。")).toBeVisible();
-  await page.reload();
-  await expect(page.getByText("三部会の役割を整理した。")).toBeVisible();
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await activate(
-    page.getByRole("button", { name: "身分制と財政難", exact: true }),
-  );
-  await expect(page.locator(".mastery-control strong")).toHaveText("定着した");
-  await activate(
-    page.getByRole("button", { name: "身分制と財政難", exact: true }),
-  );
-  await expect(
-    page.getByRole("button", { name: "身分制と財政難", exact: true }),
-  ).toHaveAttribute("aria-expanded", "false");
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  for (const name of ["アウトプット", "理解を深める"]) {
-    await activate(
-      page
-        .getByRole("navigation", { name: "テーマ全体の学習" })
-        .getByRole("link", { name, exact: true }),
-    );
-    await expect(
-      page.getByRole("region", { name: "現在の学習対象" }),
-    ).toContainText("テーマ全体");
-    await expect(
-      page.getByRole("button", { name: "学習を記録", exact: true }),
-    ).toBeVisible();
-    await activate(
-      page.getByRole("link", { name: "テーマに戻る", exact: true }),
-    );
-  }
-  await activate(page.getByRole("link", { name: /^過去問/ }));
-  await expect(page).toHaveURL(/\/subjects\//);
-  await expect(page.getByText("準備中 · 現在は利用できません")).toBeVisible();
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  await activate(page.getByRole("link", { name: /^集中する/ }));
-  await expect(page.getByText("準備中 · 現在は利用できません")).toBeVisible();
-  await activate(
-    page.getByRole("link", { name: "テーマに戻る", exact: true }).first(),
-  );
-  await activate(page.getByRole("button", { name: "テーマのメニュー" }));
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "キャンセル", exact: true }));
-  await expect(
-    page.getByRole("heading", { name: "フランス革命", level: 1 }),
-  ).toBeVisible();
-  await activate(page.getByRole("button", { name: "テーマのメニュー" }));
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "削除する", exact: true }));
-  await expect(page).toHaveURL("/");
-  await page.reload();
-  await expect(page.locator(".theme-row")).toHaveCount(0);
-  await page.goto("/history");
-  await expect(page.getByText("まだ記録はありません。")).toBeVisible();
-  expect(errors).toEqual([]);
-});
-test("v1 themes, original text, records and completed roadmap survive real browser migration", async ({
-  page,
-}) => {
-  await page.route("**/__seed", (route) =>
-    route.fulfill({
-      contentType: "text/html",
-      body: "<!doctype html><title>Migration fixture</title>",
-    }),
-  );
-  await page.goto("/__seed");
-  await page.evaluate(async () => {
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.open("yohaku-study", 1);
-      request.onupgradeneeded = () => {
-        const db = request.result;
-        db.createObjectStore("themes", { keyPath: "id" });
-        db.createObjectStore("records", { keyPath: "id" }).createIndex(
-          "by-theme",
-          "themeId",
-        );
-      };
-      request.onerror = () => reject(request.error);
-      request.onsuccess = () => {
-        const db = request.result;
-        const tx = db.transaction(["themes", "records"], "readwrite");
-        const theme = {
-          id: "legacy",
-          name: "旧版のテーマ",
-          subject: "世界史",
-          description: "消してはいけない説明",
-          createdAt: "2026-11-01T00:00:00.000Z",
-          updatedAt: "2026-11-01T00:00:00.000Z",
-          lastStudiedAt: "2026-11-01T00:00:00.000Z",
-          roadmap: [
-            { id: "r1", title: "原因", completed: true },
-            { id: "r2", title: "影響", completed: false },
-          ],
-        };
-        tx.objectStore("themes").add(theme);
-        tx.objectStore("records").add({
-          id: "note",
-          themeId: "legacy",
-          note: "旧版の記録",
-          studiedAt: "2026-11-01T00:00:00.000Z",
-        });
-        tx.oncomplete = () => {
-          db.close();
-          resolve();
-        };
-        tx.onerror = () => reject(tx.error);
-      };
-    });
-  });
-  await page.goto("/");
-  await expect(page.locator(".theme-row")).toContainText("旧版のテーマ");
-  await activate(page.locator(".theme-row"));
-  await activate(page.locator(".theme-goal-disclosure summary"));
-  await expect(page.getByText("消してはいけない説明")).toBeVisible();
-  await expect(page.getByText("旧版の記録")).toBeVisible();
-  await expect(page.locator(".compact-roadmap-entry")).toContainText("0 / 2");
-  await expect(page.locator(".items-preview .mastery-badge")).toHaveText([
-    "未評価",
-    "未評価",
-  ]);
-  await page.reload();
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await activate(page.getByRole("button", { name: "原因", exact: true }));
-  await activate(page.getByRole("button", { name: "影響", exact: true }));
-  await expect(page.getByText("旧版：習得済み", { exact: true })).toHaveCount(
-    1,
-  );
-  await expect(page.locator(".mastery-control strong")).toHaveText([
-    "未評価",
-    "未評価",
-  ]);
-});
+
 test("full-screen editor follows a shrunken and panned visual viewport and keeps Save usable", async ({
   page,
 }) => {
@@ -392,7 +955,7 @@ async function addItem(page: Page, title = "革命が起きた原因") {
     .getByRole("textbox", { name: /^到達目標/ })
     .fill("自分の言葉で説明できる");
   await activate(page.getByRole("button", { name: "保存", exact: true }));
-  await activate(page.getByRole("button", { name: title, exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 async function changeMastery(
   page: Page,
@@ -420,107 +983,7 @@ async function changeMastery(
   );
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
-async function saveLearning(page: Page, note: string, rating?: string) {
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await page
-    .getByRole("dialog")
-    .locator("textarea")
-    .first()
-    .waitFor({ state: "visible" });
-  if (await page.getByLabel("アウトプット本文", { exact: true }).count())
-    await page.getByLabel("アウトプット本文", { exact: true }).fill(note);
-  else await page.getByLabel("自分で考えた問い", { exact: true }).fill(note);
 
-  if (rating !== undefined)
-    await activate(page.getByRole("radio", { name: rating, exact: true }));
-  await activate(page.getByRole("button", { name: "学習を保存" }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(
-    page.locator(".record-list p").filter({ hasText: note }),
-  ).toBeVisible();
-}
-test("TRACE Note displays four independent stages and keeps v4 data unchanged on reload", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await expect(page).toHaveTitle(/TRACE Note/);
-  await createTheme(page);
-  const themeUrl = page.url();
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  for (const [index, label] of [
-    "未着手",
-    "学習中",
-    "説明できる",
-    "定着した",
-  ].entries()) {
-    await addItem(page, `項目${index + 1}`);
-    await changeMastery(page, label);
-  }
-  await addItem(page, "未評価の項目");
-  for (const state of ["1", "2", "3", "4", "unrated"])
-    await expect(page.locator(`[data-learning-state="${state}"]`)).toHaveCount(
-      1,
-    );
-  await expect(
-    page.getByRole("img", { name: /フランス革命の習得状況/ }),
-  ).toHaveAttribute(
-    "aria-label",
-    /未着手 1項目、学習中 1項目、説明できる 1項目、定着した 1項目、未評価 1項目/,
-  );
-  // Read every store, including original migration backups. Rendering must not rewrite any row.
-  async function snapshot() {
-    return page.evaluate(
-      async () =>
-        new Promise<unknown>((resolve, reject) => {
-          const request = indexedDB.open("yohaku-study");
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const db = request.result;
-            const stores = Array.from(db.objectStoreNames);
-            const tx = db.transaction(stores, "readonly");
-            const rows: Record<string, unknown[]> = {};
-            stores.forEach((name) => {
-              const read = tx.objectStore(name).getAll();
-              read.onsuccess = () => {
-                rows[name] = read.result;
-              };
-            });
-            tx.oncomplete = () => {
-              const version = db.version;
-              db.close();
-              resolve({ version, rows });
-            };
-            tx.onerror = () => reject(tx.error);
-          };
-        }),
-    );
-  }
-  const before = await snapshot();
-  await page.goto("/");
-  const summary = page.getByRole("region", { name: "学習の軌跡" });
-  await expect(summary.locator("dd")).toHaveText(["1", "1", "0"]);
-  await expect(summary.locator(".summary-total strong")).toHaveText("1");
-  await page.reload();
-  await expect(
-    page.getByRole("img", { name: /すべての学習項目の習得状況/ }),
-  ).toHaveAttribute("aria-label", /定着した 1項目/);
-  await page.goto(`${themeUrl}/roadmap`);
-  await expect(page.locator('[data-learning-state="2"]')).toContainText(
-    "項目2",
-  );
-  expect(await snapshot()).toEqual(before);
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await activate(page.getByRole("button", { name: "項目2", exact: true }));
-  await expect(
-    page.getByRole("navigation", { name: "項目の学習" }),
-  ).toBeVisible();
-  await page.setViewportSize({ width: 320, height: 640 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-});
 test("home subject addition is direct, persistent and works in a shortened viewport", async ({
   page,
 }) => {
@@ -549,186 +1012,6 @@ test("home subject addition is direct, persistent and works in a shortened viewp
   await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
     "同じ名前",
   );
-});
-test("theme and item share both learning screens but retain separate records and completion", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await activate(
-    page
-      .getByRole("navigation", { name: "テーマ全体の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText("フランス革命");
-  await saveLearning(page, "テーマ全体の理解を整理", "一部できた");
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "一部できた",
-  );
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await addItem(page);
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText("学習項目");
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText("革命が起きた原因");
-  await expect(page.locator(".completion-summary strong")).toHaveText("未評価");
-  await saveLearning(page, "項目の原因を説明", "十分できた");
-  await expect(
-    page.getByText("テーマ全体の理解を整理", { exact: true }),
-  ).toHaveCount(0);
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "十分できた",
-  );
-  await page.reload();
-  await expect(
-    page.getByText("項目の原因を説明", { exact: true }),
-  ).toBeVisible();
-  await activate(
-    page.getByRole("link", { name: "ロードマップに戻る", exact: true }),
-  );
-  await expect(
-    page.getByRole("button", { name: "革命が起きた原因", exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  await expect(
-    page.getByRole("img", { name: /フランス革命の習得状況/ }),
-  ).toHaveAttribute("aria-label", /未評価 1項目/);
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "理解を深める", exact: true }),
-  );
-  await expect(
-    page.getByRole("heading", { name: "理解を深める", level: 1 }),
-  ).toBeVisible();
-  await expect(page.locator(".completion-summary")).toHaveCount(0);
-  await saveLearning(page, "なぜ財政難になったか考えた");
-  await expect(
-    page.getByText("項目の原因を説明", { exact: true }),
-  ).toBeVisible();
-  await page.goto(themeUrl);
-  await activate(
-    page
-      .getByRole("navigation", { name: "テーマ全体の学習" })
-      .getByRole("link", { name: "理解を深める", exact: true }),
-  );
-  await expect(page.locator(".completion-summary")).toHaveCount(0);
-  await expect(page.getByText("項目の原因を説明", { exact: true })).toHaveCount(
-    0,
-  );
-  await page.goto("/history");
-  await page.getByLabel("学習対象", { exact: true }).selectOption("item");
-  await expect(
-    page.getByText("項目の原因を説明", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByText("テーマ全体の理解を整理", { exact: true }),
-  ).toHaveCount(0);
-  await page.getByLabel("学習対象", { exact: true }).selectOption("theme");
-  await expect(
-    page.getByText("テーマ全体の理解を整理", { exact: true }),
-  ).toBeVisible();
-  await expect(page.getByText("項目の原因を説明", { exact: true })).toHaveCount(
-    0,
-  );
-});
-test("invalid, foreign and deleted item targets never fall back to theme learning", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  const firstUrl = page.url();
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await addItem(page);
-  const itemHref = await page
-    .getByRole("navigation", { name: "項目の学習" })
-    .getByRole("link", { name: "アウトプット", exact: true })
-    .getAttribute("href");
-  const itemId = new URL(itemHref!, "http://127.0.0.1:3100").searchParams.get(
-    "item",
-  )!;
-  await page.goto("/");
-  await createTheme(page, "産業革命", "世界史", true);
-  const secondUrl = page.url();
-  for (const query of ["missing", "", encodeURIComponent(itemId)]) {
-    await page.goto(`${secondUrl}/output?item=${query}`);
-    await expect(
-      page.getByRole("heading", { name: "学習対象が見つかりません" }),
-    ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "学習を記録", exact: true }),
-    ).toHaveCount(0);
-  }
-  await page.goto(`${firstUrl}/roadmap`);
-  await activate(
-    page.getByRole("button", { name: "革命が起きた原因のメニュー" }),
-  );
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "削除する", exact: true }));
-  await page.goto(itemHref!);
-  await expect(
-    page.getByRole("heading", { name: "学習対象が見つかりません" }),
-  ).toBeVisible();
-});
-test("item record form remains scoped and savable above a simulated keyboard, including an optional four-level rating", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await createTheme(page);
-  await activate(page.getByRole("link", { name: "ロードマップを見る" }));
-  await addItem(page);
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByRole("dialog").locator(".target-summary"),
-  ).toContainText("革命が起きた原因");
-  await page.getByLabel("アウトプット本文").fill("キーボード表示中の項目メモ");
-  await page.evaluate(() => {
-    Object.defineProperty(visualViewport!, "height", {
-      configurable: true,
-      get: () => 320,
-    });
-    Object.defineProperty(visualViewport!, "offsetTop", {
-      configurable: true,
-      get: () => 60,
-    });
-    visualViewport!.dispatchEvent(new Event("resize"));
-  });
-  await expect(page.getByRole("dialog")).toHaveCSS("height", "320px");
-  await activate(page.getByRole("radio", { name: "まだ難しい", exact: true }));
-  const box = await page
-    .getByRole("button", { name: "学習を保存" })
-    .boundingBox();
-  expect(box!.y + box!.height).toBeLessThanOrEqual(380);
-  await activate(page.getByRole("button", { name: "学習を保存" }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.reload();
-  await expect(
-    page.getByText("キーボード表示中の項目メモ", { exact: true }),
-  ).toBeVisible();
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "まだ難しい",
-  );
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
 });
 
 test("subject icons can be overridden and are not replaced by rename or reload", async ({
@@ -790,394 +1073,6 @@ test("subject icons can be overridden and are not replaced by rename or reload",
   await expect(
     page.locator('.subject-heading [data-subject-icon="language"]'),
   ).toHaveCount(1);
-});
-test("output history is session-specific and independent of theme and item mastery, including a decrease", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await changeMastery(page, "説明できる", "theme");
-  await activate(
-    page
-      .getByRole("navigation", { name: "テーマ全体の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await saveLearning(page, "テーマのアウトプット", "一部できた");
-  await expect(page.locator(".mastery-control strong")).toHaveText(
-    "説明できる",
-  );
-  await page.goto(`${themeUrl}/roadmap`);
-  await addItem(page);
-  await changeMastery(page, "定着した");
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await expect(page).toHaveURL(/\/output\?item=/);
-  const itemUrl = page.url();
-  for (const [note, rating] of [
-    ["初回", "まだ難しい"],
-    ["復習後", "十分できた"],
-    ["未評価の回", undefined],
-  ]) {
-    await saveLearning(page, note!, rating);
-  }
-  await expect(page.locator(".completion-summary strong")).toHaveText("未評価");
-  await expect(page.locator(".mastery-control strong")).toHaveText("定着した");
-  for (const [note, rating] of [
-    ["初回", "まだ難しい"],
-    ["復習後", "十分できた"],
-    ["未評価の回", "未評価"],
-  ]) {
-    await expect(
-      page
-        .locator(".record-list li")
-        .filter({ has: page.getByText(note, { exact: true }) }),
-    ).toContainText(`アウトプット完成度 · ${rating}`);
-  }
-  await changeMastery(page, "学習中");
-  await activate(
-    page.getByRole("button", { name: "項目の習得度を変更", exact: true }),
-  );
-  await expect(
-    page.getByRole("region", { name: "習得度の履歴" }).locator("li strong"),
-  ).toHaveText(["学習中", "定着した"]);
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await page.reload();
-  await expect(page.locator(".mastery-control strong")).toHaveText("学習中");
-  await page.goto(`${themeUrl}/output`);
-  await expect(page.locator(".mastery-control strong")).toHaveText(
-    "説明できる",
-  );
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "一部できた",
-  );
-  await page.goto(itemUrl);
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(page.getByRole("spinbutton")).toHaveCount(0);
-  await activate(page.getByRole("radio", { name: "概ねできた", exact: true }));
-  await activate(
-    page.getByRole("button", { name: "未評価で保存", exact: true }),
-  );
-  await expect(
-    page.getByRole("radio", { name: "概ねできた", exact: true }),
-  ).not.toBeChecked();
-});
-test("v3 percentages and all original stores survive a real browser v6 upgrade without automatic ratings", async ({
-  page,
-}) => {
-  await page.route("**/__seed-v3", (route) =>
-    route.fulfill({
-      contentType: "text/html",
-      body: "<!doctype html><title>v3 fixture</title>",
-    }),
-  );
-  await page.goto("/__seed-v3");
-  const original = await page.evaluate(
-    async () =>
-      new Promise<Record<string, unknown[]>>((resolve, reject) => {
-        const request = indexedDB.open("yohaku-study", 3);
-        request.onupgradeneeded = () => {
-          const db = request.result;
-          db.createObjectStore("subjects", { keyPath: "id" }).createIndex(
-            "by-name",
-            "normalizedName",
-            { unique: true },
-          );
-          db.createObjectStore("themes", { keyPath: "id" }).createIndex(
-            "by-subject",
-            "subjectId",
-          );
-          db.createObjectStore("items", { keyPath: "id" }).createIndex(
-            "by-theme",
-            "themeId",
-          );
-          const records = db.createObjectStore("records", { keyPath: "id" });
-          records.createIndex("by-theme", "themeId");
-          records.createIndex("by-target", ["targetType", "targetId"]);
-          db.createObjectStore("legacy-themes-v1", { keyPath: "id" });
-          db.createObjectStore("legacy-records-v2", {
-            keyPath: "id",
-          }).createIndex("by-theme", "themeId");
-        };
-        request.onerror = () => reject(request.error);
-        request.onsuccess = async () => {
-          const db = request.result;
-          const now = "2026-11-01T00:00:00.000Z";
-          const subject = {
-            id: "s",
-            name: "線形代数",
-            normalizedName: "線形代数",
-            createdAt: now,
-            updatedAt: now,
-          };
-          const theme = {
-            id: "t",
-            subjectId: "s",
-            subject: "線形代数",
-            name: "行列",
-            description: "旧目標",
-            roadmap: [],
-            createdAt: now,
-            updatedAt: now,
-            lastStudiedAt: now,
-          };
-          const item = {
-            id: "i",
-            themeId: "t",
-            title: "逆行列",
-            goal: "旧到達目標",
-            completed: true,
-            position: 0,
-            createdAt: now,
-            updatedAt: now,
-          };
-          const record = {
-            id: "r0",
-            themeId: "t",
-            targetType: "theme",
-            targetId: "t",
-            activity: "output",
-            note: "旧ゼロ評価",
-            completion: 0,
-            studiedAt: now,
-          };
-          const old: Record<string, unknown[]> = {
-            subjects: [subject],
-            themes: [theme],
-            items: [item],
-            records: [
-              record,
-              {
-                ...record,
-                id: "r100",
-                targetType: "item",
-                targetId: "i",
-                note: "旧満点評価",
-                completion: 100,
-              },
-            ],
-            "legacy-themes-v1": [{ ...theme, id: "original" }],
-            "legacy-records-v2": [{ ...record, id: "backup" }],
-          };
-          const tx = db.transaction(Object.keys(old), "readwrite");
-          for (const [store, rows] of Object.entries(old))
-            for (const row of rows) tx.objectStore(store).add(row);
-          tx.oncomplete = () => {
-            db.close();
-            resolve(old);
-          };
-          tx.onerror = () => reject(tx.error);
-        };
-      }),
-  );
-  await page.goto("/");
-  await expect(
-    page.locator('.subject-heading [data-subject-icon="math"]'),
-  ).toHaveCount(1);
-  await page.goto("/themes/t/output");
-  await expect(page.getByText("旧評価 0%", { exact: true })).toBeVisible();
-  await expect(page.locator(".mastery-control strong")).toHaveText("未評価");
-  await expect(page.locator(".completion-summary strong")).toHaveText("未評価");
-  await page.goto("/themes/t/output?item=i");
-  await expect(page.getByText("旧評価 100%", { exact: true })).toBeVisible();
-  await expect(page.locator(".mastery-control strong")).toHaveText("未評価");
-  await page.reload();
-  const after = await page.evaluate(
-    async () =>
-      new Promise<{ version: number; rows: Record<string, unknown[]> }>(
-        (resolve, reject) => {
-          const request = indexedDB.open("yohaku-study");
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const db = request.result;
-            const rows: Record<string, unknown[]> = {};
-            const tx = db.transaction(Array.from(db.objectStoreNames));
-            for (const store of Array.from(db.objectStoreNames)) {
-              const read = tx.objectStore(store).getAll();
-              read.onsuccess = () => {
-                rows[store] = read.result;
-              };
-            }
-            tx.oncomplete = () => {
-              const version = db.version;
-              db.close();
-              resolve({ version, rows });
-            };
-            tx.onerror = () => reject(tx.error);
-          };
-        },
-      ),
-  );
-  expect(after.version).toBe(6);
-  for (const [store, rows] of Object.entries(original))
-    expect(after.rows[store]).toEqual(rows);
-  expect(after.rows["mastery-history"]).toEqual([]);
-});
-
-test("theme opens into four ordered items and starts item or whole-theme learning without a management detour", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await changeMastery(page, "学習中", "theme");
-  await activate(
-    page.getByRole("link", { name: "ロードマップを見る", exact: true }),
-  );
-  const names = [
-    "革命前の社会",
-    "革命が起きた原因",
-    "革命の出来事",
-    "人権宣言",
-    "革命の影響",
-    "近代へのつながり",
-  ];
-  for (const [index, name] of names.entries()) {
-    await addItem(page, name);
-    if (index < 3)
-      await changeMastery(page, ["定着した", "説明できる", "学習中"][index]);
-  }
-  // Opening, expanding and switching views must not write learning or assessment data.
-  async function snapshot() {
-    return page.evaluate(
-      async () =>
-        new Promise<Record<string, unknown[]>>((resolve, reject) => {
-          const request = indexedDB.open("yohaku-study");
-          request.onerror = () => reject(request.error);
-          request.onsuccess = () => {
-            const db = request.result;
-            const rows: Record<string, unknown[]> = {};
-            const tx = db.transaction(Array.from(db.objectStoreNames));
-            for (const store of Array.from(db.objectStoreNames)) {
-              const read = tx.objectStore(store).getAll();
-              read.onsuccess = () => {
-                rows[store] = read.result;
-              };
-            }
-            tx.oncomplete = () => {
-              db.close();
-              resolve(rows);
-            };
-            tx.onerror = () => reject(tx.error);
-          };
-        }),
-    );
-  }
-  const before = await snapshot();
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  const list = page.getByRole("region", { name: "学習項目", exact: true });
-  await expect(list.locator(".roadmap-item")).toHaveCount(4);
-  await expect(list.locator(".item-title-state > span:first-child")).toHaveText(
-    names.slice(0, 4),
-  );
-  await expect(list.locator(".mastery-badge")).toHaveText([
-    "定着した",
-    "説明できる",
-    "学習中",
-    "未評価",
-  ]);
-  await expect(page.locator(".detail-intro > .mastery-badge")).toHaveText(
-    "学習中",
-  );
-  await expect(page.locator(".compact-roadmap-entry")).toContainText(
-    "説明できる以上 2 / 6 項目",
-  );
-  await expect(
-    list.getByRole("button", { name: names[0], exact: true }),
-  ).toBeInViewport();
-  const first = await list
-    .getByRole("button", { name: names[0], exact: true })
-    .boundingBox();
-  const nav = await page
-    .getByRole("navigation", { name: "メインナビゲーション" })
-    .boundingBox();
-  expect(first!.y + first!.height).toBeLessThan(nav!.y);
-  await expect(page.locator(".roadmap-entry")).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "テーマ全体の習得度を変更", exact: true }),
-  ).toHaveCount(0);
-  // Two taps: open the row, then its existing shared learning action.
-  await activate(list.getByRole("button", { name: names[0], exact: true }));
-  await expect(
-    list.getByText("自分の言葉で説明できる", { exact: true }),
-  ).toBeVisible();
-  await activate(
-    list
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText(names[0]);
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText("学習項目");
-  await expect(page).toHaveURL(/item=.*&from=theme/);
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  await expect(
-    list.getByRole("button", { name: names[0], exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  await activate(
-    list.getByRole("button", { name: "すべて表示（6項目）", exact: true }),
-  );
-  await expect(list.locator(".item-title-state > span:first-child")).toHaveText(
-    names,
-  );
-  await activate(list.getByRole("button", { name: names[5], exact: true }));
-  const lastRow = list
-    .locator(".roadmap-item")
-    .filter({ has: page.getByRole("button", { name: names[5], exact: true }) });
-  await activate(
-    lastRow.getByRole("link", { name: "理解を深める", exact: true }),
-  );
-  await expect(
-    page.getByRole("region", { name: "現在の学習対象" }),
-  ).toContainText(names[5]);
-  await activate(page.getByRole("link", { name: "テーマに戻る", exact: true }));
-  await expect(list.locator(".roadmap-item")).toHaveCount(6);
-  await expect(
-    list.getByRole("button", { name: names[5], exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  await page.reload();
-  await expect(
-    list.getByRole("button", { name: names[5], exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  await activate(
-    list.getByRole("button", { name: "表示を少なくする", exact: true }),
-  );
-  await expect(list.locator(".roadmap-item")).toHaveCount(4);
-  for (const feature of ["アウトプット", "理解を深める"]) {
-    await activate(
-      page
-        .getByRole("navigation", { name: "テーマ全体の学習" })
-        .getByRole("link", { name: feature, exact: true }),
-    );
-    await expect(
-      page.getByRole("region", { name: "現在の学習対象" }),
-    ).toContainText("テーマ全体");
-    await expect(page).not.toHaveURL(/item=/);
-    await activate(
-      page.getByRole("link", { name: "テーマに戻る", exact: true }),
-    );
-  }
-  await expect(
-    page.getByRole("heading", { name: "過去問・演習", exact: true }),
-  ).toBeVisible();
-  expect(await snapshot()).toEqual(before);
-  await page.goto(themeUrl);
-  await page.setViewportSize({ width: 320, height: 640 });
-  await expect(
-    list.getByRole("button", { name: names[0], exact: true }),
-  ).toBeInViewport();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
 });
 
 test("theme mastery badge is read-only while its menu edits the existing history above a simulated keyboard", async ({
@@ -1259,110 +1154,6 @@ async function openRoadmap(page: Page) {
     page.getByRole("heading", { name: "ロードマップ", level: 1 }),
   ).toBeVisible();
 }
-test("Phase 2 goal, ordered items, next suggestion and assessments survive reorder, edit, delete and reload", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await openRoadmap(page);
-  await activate(page.getByRole("button", { name: "目標を編集", exact: true }));
-  await page
-    .getByRole("textbox", { name: "テーマ全体の到達目標", exact: true })
-    .fill("政治と社会の変化を比較して説明できる");
-  await activate(page.getByRole("button", { name: "保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(
-    page.getByRole("region", { name: "テーマ全体の到達目標" }),
-  ).toContainText("政治と社会の変化を比較して説明できる");
-  for (const [title, level] of [
-    ["概要", "説明できる"],
-    ["原因", "学習中"],
-    ["影響", "未着手"],
-  ]) {
-    await addItem(page, title);
-    await changeMastery(page, level);
-  }
-  await expect(
-    page.getByRole("link", { name: "次に取り組む：原因", exact: true }),
-  ).toBeVisible();
-  await expect(page.locator(".roadmap-totals")).toContainText("全 3 項目");
-  await expect(page.locator(".roadmap-totals")).toContainText(
-    "説明できる以上 1 項目",
-  );
-  await expect(page.locator(".roadmap-overview")).not.toContainText("%");
-  await activate(page.getByRole("button", { name: "並び替え", exact: true }));
-  await expect(
-    page.getByRole("button", { name: "概要を上へ", exact: true }),
-  ).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "影響を下へ", exact: true }),
-  ).toBeDisabled();
-  await activate(page.getByRole("button", { name: "影響を上へ", exact: true }));
-  await expect(page.locator(".reorder-list li strong")).toHaveText([
-    "概要",
-    "影響",
-    "原因",
-  ]);
-  await activate(
-    page.getByRole("button", { name: "並び替え完了", exact: true }),
-  );
-  await page.reload();
-  await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
-    ["概要", "影響", "原因"],
-  );
-  await expect(
-    page.getByRole("link", { name: "次に取り組む：影響", exact: true }),
-  ).toBeVisible();
-  await activate(
-    page.getByRole("link", { name: "次に取り組む：影響", exact: true }),
-  );
-  await expect(
-    page.getByRole("button", { name: "影響", exact: true }),
-  ).toHaveAttribute("aria-expanded", "true");
-  const row = page
-    .locator(".roadmap-item")
-    .filter({ has: page.getByRole("button", { name: "影響", exact: true }) });
-  await expect(row.locator(".mastery-control strong")).toHaveText("未着手");
-  await activate(
-    page.getByRole("button", { name: "影響のメニュー", exact: true }),
-  );
-  await activate(page.getByRole("menuitem", { name: "編集", exact: true }));
-  await page
-    .getByRole("textbox", { name: "学習項目", exact: true })
-    .fill("結果");
-  await page
-    .getByRole("textbox", { name: /^到達目標/ })
-    .fill("変化を自分の言葉で説明できる");
-  await activate(page.getByRole("button", { name: "保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(
-    page.getByText("変化を自分の言葉で説明できる", { exact: true }),
-  ).toBeVisible();
-  await activate(
-    page.getByRole("button", { name: "結果のメニュー", exact: true }),
-  );
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "削除する", exact: true }));
-  await expect(page.locator(".roadmap-item")).toHaveCount(2);
-  await expect(
-    page.getByRole("link", { name: "次に取り組む：原因", exact: true }),
-  ).toBeVisible();
-  await page.setViewportSize({ width: 320, height: 640 });
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.goto(themeUrl);
-  await activate(page.locator(".theme-goal-disclosure summary"));
-  await expect(
-    page.getByText("政治と社会の変化を比較して説明できる", { exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.locator(".items-preview .item-title-state > span:first-child"),
-  ).toHaveText(["概要", "原因"]);
-});
 
 test("Phase 2 fixed prompt copies the matching JSON schema and previews an append before saving above a keyboard", async ({
   page,
@@ -1527,9 +1318,9 @@ test("Phase 2 JSON syntax, context and duplicates are explicit and never replace
   );
   await page.reload();
   await activate(
-    page.getByRole("button", { name: "既存の項目", exact: true }).first(),
+    page.getByRole("link", { name: "既存の項目", exact: true }).first(),
   );
-  await expect(page.locator(".roadmap-item").first()).toContainText(
+  await expect(page.locator(".item-detail-goal")).toContainText(
     "自分の言葉で説明できる",
   );
 });
@@ -1905,685 +1696,4 @@ test("draft write failures retain input and retry without importing or changing 
   await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
     ["変更しない項目"],
   );
-});
-
-async function startOutput(page: Page) {
-  await activate(
-    page
-      .getByRole("navigation", { name: "テーマ全体の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-}
-async function lastRecord(page: Page) {
-  await activate(
-    page.getByRole("link", { name: "記録を開く", exact: true }).first(),
-  );
-  await expect(page).toHaveURL(/\/records\//);
-}
-async function promptDocument(page: Page) {
-  const prompt = await page
-    .getByLabel("生成したプロンプト", { exact: true })
-    .inputValue();
-  return { prompt, document: JSON.parse(prompt.split("\n\n").at(-1)!) };
-}
-test("Phase 3 output drafts restore long multiline text and optional ratings, then records can be read, edited and deleted without changing mastery", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await startOutput(page);
-  const body = "自分の記憶から説明した内容。\n".repeat(100);
-  await expect(
-    page.getByText("背景と影響", { exact: true }).last(),
-  ).not.toBeVisible();
-  await page.getByLabel("アウトプット本文", { exact: true }).fill(body);
-  await activate(page.getByRole("radio", { name: "概ねできた", exact: true }));
-  await waitForDraft(page);
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue(body);
-  await expect(
-    page.getByRole("radio", { name: "概ねできた", exact: true }),
-  ).toBeChecked();
-  await page.screenshot({ path: test.info().outputPath("phase-3-output.png") });
-  await page.getByLabel("アウトプット本文", { exact: true }).press("End");
-  await page.getByLabel("アウトプット本文", { exact: true }).press("Enter");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "概ねできた",
-  );
-  await expect(page.locator(".mastery-control strong")).toHaveText("未評価");
-  await lastRecord(page);
-  await expect(page.locator(".record-full-text")).toContainText(body.trim());
-  const recordUrl = page.url();
-  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("振り返って書き直した本文");
-  await activate(
-    page.getByRole("button", { name: "未評価で保存", exact: true }),
-  );
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.reload();
-  await expect(page.locator(".record-full-text")).toHaveText(
-    "振り返って書き直した本文",
-  );
-  await expect(page.locator(".record-evaluation")).toContainText("未評価");
-  await activate(
-    page.getByRole("button", { name: "記録のメニュー", exact: true }),
-  );
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "キャンセル", exact: true }));
-  await expect(page.locator(".record-full-text")).toBeVisible();
-  await activate(
-    page.getByRole("button", { name: "記録のメニュー", exact: true }),
-  );
-  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
-  await activate(page.getByRole("button", { name: "削除する", exact: true }));
-  await expect(page).toHaveURL(/\/history/);
-  await page.goto(recordUrl);
-  await expect(
-    page.getByRole("heading", { name: "記録が見つかりません", exact: true }),
-  ).toBeVisible();
-  await page.goto(themeUrl + "/output");
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("");
-});
-test("Phase 3 deepening uses six safe templates and keeps the question separate from escaped AI feedback", async ({
-  page,
-}) => {
-  await page.addInitScript(() =>
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: async () => {} },
-    }),
-  );
-  await page.goto("/");
-  await createTheme(page);
-  await activate(
-    page
-      .getByRole("navigation", { name: "テーマ全体の学習" })
-      .getByRole("link", { name: "理解を深める", exact: true }),
-  );
-  await expect(
-    page.getByRole("heading", { name: "理解を深める", level: 1, exact: true }),
-  ).toBeVisible();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  const question = page.getByLabel("自分で考えた問い", { exact: true });
-  await expect(page.getByRole("dialog").getByRole("textbox")).toHaveCount(1);
-  await expect(question).toHaveValue("フランス革命とは？");
-  for (const [kind, template] of [
-    ["なぜ？", "「フランス革命」にはどのような理由や背景があるのか？"],
-    ["どうやって？", "フランス革命はどのような仕組みなのか？"],
-    ["何が違う？", "フランス革命と△△は何が違う？"],
-    ["もし〜だったら？", "もし△△だったら、フランス革命はどうなる？"],
-    ["何とつながる？", "フランス革命は△△とどう関係する？"],
-  ]) {
-    await activate(page.getByRole("radio", { name: kind, exact: true }));
-    await expect(question).toHaveValue(template);
-  }
-  await question.fill("税負担と社会の不満はどうつながる？");
-  await activate(page.getByRole("radio", { name: "何が違う？", exact: true }));
-  await expect(question).toHaveValue("税負担と社会の不満はどうつながる？");
-  await activate(
-    page.getByRole("button", { name: "テンプレートで置き換える", exact: true }),
-  );
-  await expect(question).toHaveValue("フランス革命と△△は何が違う？");
-  await question.fill("税負担と社会の不満はどうつながる？");
-  await activate(
-    page.getByRole("radio", { name: "何とつながる？", exact: true }),
-  );
-  await activate(
-    page.getByRole("button", {
-      name: "文章を残して種類だけ変える",
-      exact: true,
-    }),
-  );
-  await expect(question).toHaveValue("税負担と社会の不満はどうつながる？");
-  await waitForDraft(page);
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByRole("radio", { name: "何とつながる？", exact: true }),
-  ).toBeChecked();
-  await expect(
-    page.getByLabel("自分で考えた問い", { exact: true }),
-  ).toHaveValue("税負担と社会の不満はどうつながる？");
-  await activate(
-    page.getByRole("button", { name: "保存して外部AIへ", exact: true }),
-  );
-  await expect(page).toHaveURL(/\/records\/.*ai=1/);
-  await expect(page.getByRole("dialog")).toBeVisible();
-  const { prompt, document } = await promptDocument(page);
-  expect(prompt).toContain("税負担と社会の不満はどうつながる？");
-  expect(document.version).toBe(3);
-  expect(document.kind).toBe("deepen");
-  await activate(
-    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
-  );
-  await expect(page.getByRole("status", { name: "コピー状況" })).toHaveText(
-    "コピーしました",
-  );
-  await expect(
-    page.getByRole("textbox", { name: "JSON", exact: true }),
-  ).toHaveCount(0);
-  await activate(
-    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
-  );
-  document.explanation =
-    '<img src=x onerror="window.injected=true">は文字として扱う';
-  document.questions = ["ほかの身分の視点からどう考える？"];
-  await page
-    .getByRole("textbox", { name: "JSON", exact: true })
-    .fill(JSON.stringify(document));
-  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
-  await expect(
-    page.getByText(document.explanation, { exact: true }),
-  ).toBeVisible();
-  await expect(page.locator(".feedback-body img")).toHaveCount(0);
-  await waitForDraft(page);
-  await page.reload();
-  await expect(
-    page.getByText(document.explanation, { exact: true }),
-  ).toBeVisible();
-  await activate(
-    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
-  );
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".deepening-content")).toContainText(
-    "税負担と社会の不満はどうつながる？",
-  );
-  await expect(page.locator(".feedback-entry")).toContainText(
-    document.explanation,
-  );
-  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await question.fill("別の立場から税負担をどう考える？");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await page.reload();
-  await expect(page.locator(".deepening-content")).toContainText(
-    "別の立場から税負担をどう考える？",
-  );
-  await expect(
-    page.getByText("編集前の記録へのフィードバック", { exact: true }),
-  ).toBeVisible();
-});
-test("Phase 3 output feedback validates its target, resumes copying and JSON, preserves self assessment, and filters by subject and item", async ({
-  page,
-}) => {
-  await page.addInitScript(() =>
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: async () => {} },
-    }),
-  );
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await openRoadmap(page);
-  await addItem(page, "革命の原因");
-  const itemLearning = await page
-    .getByRole("navigation", { name: "項目の学習" })
-    .getByRole("link", { name: "アウトプット", exact: true })
-    .getAttribute("href");
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await saveLearning(page, "財政難と身分制度の関係を説明", "一部できた");
-  await lastRecord(page);
-  const recordUrl = page.url();
-  await activate(
-    page.getByRole("button", { name: "外部AIでフィードバック", exact: true }),
-  );
-  const { document, prompt } = await promptDocument(page);
-  expect(prompt).toContain("革命の原因");
-  expect(prompt).toContain("財政難と身分制度");
-  await activate(
-    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
-  );
-  await waitForDraft(page);
-  await page.goto("about:blank");
-  await page.goBack();
-  await page.reload();
-  await expect(page.getByRole("status", { name: "コピー状況" })).toHaveText(
-    "コピーしました",
-  );
-  await activate(
-    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
-  );
-  for (const [source, message] of [
-    ["{", "構文"],
-    [JSON.stringify({ ...document, recordId: "other" }), "記録ID"],
-    [JSON.stringify({ ...document, version: 2 }), "version"],
-    [JSON.stringify({ ...document, questions: [] }), "questions"],
-  ]) {
-    await page.getByRole("textbox", { name: "JSON", exact: true }).fill(source);
-    await activate(
-      page.getByRole("button", { name: "プレビュー", exact: true }),
-    );
-    await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
-      message,
-    );
-  }
-  await page
-    .getByRole("textbox", { name: "JSON", exact: true })
-    .fill("{ partial");
-  await waitForDraft(page);
-  await page.reload();
-  await expect(
-    page.getByRole("textbox", { name: "JSON", exact: true }),
-  ).toHaveValue("{ partial");
-  document.strengths = ["説明の因果関係を整理できている"];
-  document.questions = ["税制を比較すると何が見える？"];
-  await page
-    .getByRole("textbox", { name: "JSON", exact: true })
-    .fill(JSON.stringify(document));
-  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
-  await page.screenshot({
-    path: test.info().outputPath("phase-3-feedback.png"),
-  });
-  await activate(
-    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
-  );
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".record-evaluation")).toContainText("一部できた");
-  await expect(page.locator(".feedback-entry")).toContainText("因果関係");
-  await page.goto(themeUrl + "/roadmap");
-  await activate(page.getByRole("button", { name: "革命の原因", exact: true }));
-  await activate(
-    page.getByRole("link", { name: "この項目の記録", exact: true }),
-  );
-  await expect(
-    page.getByLabel("学習項目で絞り込む", { exact: true }),
-  ).toHaveValue(document.targetId);
-  await expect(page.locator(".record-list")).toContainText("税制を比較すると");
-  await expect(page.locator(".record-list")).toContainText("財政難と身分制度");
-  await page.getByLabel("記録の種類", { exact: true }).selectOption("feedback");
-  await expect(page.locator(".record-list li")).toHaveCount(1);
-  await page
-    .getByLabel("科目", { exact: true })
-    .selectOption(
-      (await page
-        .getByLabel("科目", { exact: true })
-        .locator("option")
-        .nth(1)
-        .getAttribute("value")) as string,
-    );
-  await expect(page.locator(".record-list")).toContainText("AIフィードバック");
-  await page.goto(itemLearning!);
-  await expect(page.locator(".mastery-control strong")).toHaveText("未評価");
-  await expect(page.locator(".completion-summary strong")).toHaveText(
-    "一部できた",
-  );
-  await page.goto(recordUrl);
-  await activate(
-    page.getByRole("button", { name: "外部AIでフィードバック", exact: true }),
-  );
-  await expect(
-    page.getByLabel("生成したプロンプト", { exact: true }),
-  ).toHaveValue(prompt);
-});
-test("Phase 3 failed record and feedback writes retain drafts and previous records, and manual copy is available when clipboard is denied", async ({
-  page,
-}) => {
-  await page.addInitScript(() => {
-    const put = IDBObjectStore.prototype.put,
-      add = IDBObjectStore.prototype.add;
-    IDBObjectStore.prototype.put = function (
-      ...args: Parameters<IDBObjectStore["put"]>
-    ) {
-      if (
-        this.name === "records" &&
-        (window as Window & { failRecord?: boolean }).failRecord
-      )
-        throw new DOMException("Quota", "QuotaExceededError");
-      return put.apply(this, args);
-    };
-    IDBObjectStore.prototype.add = function (
-      ...args: Parameters<IDBObjectStore["add"]>
-    ) {
-      if (
-        this.name === "learning-feedback" &&
-        (window as Window & { failFeedback?: boolean }).failFeedback
-      )
-        throw new DOMException("Quota", "QuotaExceededError");
-      return add.apply(this, args);
-    };
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: {
-        writeText: async () => {
-          throw new DOMException("Denied", "NotAllowedError");
-        },
-      },
-    });
-  });
-  await page.goto("/");
-  await createTheme(page);
-  await startOutput(page);
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("失敗しても本文を保持");
-  await waitForDraft(page);
-  await page.evaluate(() => {
-    (window as Window & { failRecord?: boolean }).failRecord = true;
-  });
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
-    "入力を残しています",
-  );
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("失敗しても本文を保持");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await lastRecord(page);
-  await activate(
-    page.getByRole("button", { name: "外部AIでフィードバック", exact: true }),
-  );
-  const { document } = await promptDocument(page);
-  await activate(
-    page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
-  );
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
-    "コピーできません",
-  );
-  await activate(
-    page.getByRole("button", { name: "プロンプトを選択", exact: true }),
-  );
-  await activate(
-    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
-  );
-  await page
-    .getByRole("textbox", { name: "JSON", exact: true })
-    .fill(JSON.stringify(document));
-  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
-  await page.evaluate(() => {
-    (window as Window & { failFeedback?: boolean }).failFeedback = true;
-  });
-  await activate(
-    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
-  );
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText(
-    "既存の記録は変更していません",
-  );
-  await waitForDraft(page);
-  await page.reload();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.locator(".feedback-body")).toContainText(
-    "正しく説明できている点",
-  );
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await expect(page.locator(".record-full-text")).toHaveText(
-    "失敗しても本文を保持",
-  );
-  await expect(page.locator(".feedback-entry")).toHaveCount(0);
-});
-test("Phase 3 learning editor remains usable above a keyboard at 320px and supports independent theme and item drafts", async ({
-  page,
-}) => {
-  await page.setViewportSize({ width: 320, height: 640 });
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await startOutput(page);
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("テーマだけの下書き");
-  await waitForDraft(page);
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await page.goto(themeUrl + "/roadmap");
-  await addItem(page, "項目だけ");
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("");
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("項目だけの下書き");
-  await page.evaluate(() => {
-    Object.defineProperty(visualViewport!, "height", {
-      configurable: true,
-      get: () => 300,
-    });
-    Object.defineProperty(visualViewport!, "offsetTop", {
-      configurable: true,
-      get: () => 50,
-    });
-    visualViewport!.dispatchEvent(new Event("resize"));
-  });
-  await expect(page.getByRole("dialog")).toHaveCSS("height", "300px");
-  const box = await page
-    .getByRole("button", { name: "学習を保存", exact: true })
-    .boundingBox();
-  expect(box!.y + box!.height).toBeLessThanOrEqual(350);
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await waitForDraft(page);
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("項目だけの下書き");
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await page.goto(themeUrl + "/output");
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("テーマだけの下書き");
-});
-
-test("Phase 3 stale edit drafts preserve both versions until the user explicitly reloads the latest record", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  await startOutput(page);
-  await page.getByLabel("アウトプット本文", { exact: true }).fill("最初の説明");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await lastRecord(page);
-  const id = new URL(page.url()).pathname.split("/").at(-1)!;
-  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("まだ保存していない編集");
-  await waitForDraft(page);
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await page.evaluate(
-    async (id) =>
-      new Promise<void>((resolve, reject) => {
-        const r = indexedDB.open("yohaku-study");
-        r.onsuccess = () => {
-          const db = r.result;
-          const tx = db.transaction("records", "readwrite");
-          const read = tx.objectStore("records").get(id);
-          read.onsuccess = () =>
-            tx.objectStore("records").put({
-              ...read.result,
-              note: "別の画面で保存された説明",
-              updatedAt: "2099-01-01T00:00:00.000Z",
-            });
-          tx.oncomplete = () => {
-            db.close();
-            resolve();
-          };
-          tx.onerror = () => reject(tx.error);
-        };
-      }),
-    id,
-  );
-  await page.reload();
-  await expect(page.locator(".record-full-text")).toHaveText(
-    "別の画面で保存された説明",
-  );
-  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await expect(page.getByRole("alert")).toContainText(
-    "別の画面で記録が更新されています",
-  );
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("まだ保存していない編集");
-  await activate(
-    page.getByRole("button", { name: "最新の記録から編集する", exact: true }),
-  );
-  await expect(
-    page.getByLabel("アウトプット本文", { exact: true }),
-  ).toHaveValue("別の画面で保存された説明");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await expect(page.locator(".record-full-text")).toHaveText(
-    "別の画面で保存された説明",
-  );
-});
-
-test("final Phase 3 output title and same-target comparison preserve earlier assessments", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  const themeUrl = page.url();
-  await startOutput(page);
-  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue(
-    "フランス革命",
-  );
-  await page.getByLabel("タイトル", { exact: true }).fill("初めての説明");
-  await page
-    .getByLabel("アウトプット本文", { exact: true })
-    .fill("最初に覚えていたこと");
-  await activate(page.getByRole("radio", { name: "まだ難しい", exact: true }));
-  await waitForDraft(page);
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(page.getByLabel("タイトル", { exact: true })).toHaveValue(
-    "初めての説明",
-  );
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await saveLearning(page, "復習後に説明できたこと", "十分できた");
-  await lastRecord(page);
-  await activate(page.getByText("過去のアウトプットと比べる", { exact: true }));
-  await expect(page.getByRole("region", { name: "今回の本文" })).toContainText(
-    "復習後に説明できたこと",
-  );
-  await expect(
-    page.getByRole("region", { name: "比較する本文" }),
-  ).toContainText("最初に覚えていたこと");
-  await expect(page.getByRole("list", { name: "完成度の履歴" })).toContainText(
-    "まだ難しい",
-  );
-  await expect(page.getByRole("list", { name: "完成度の履歴" })).toContainText(
-    "十分できた",
-  );
-  await page.screenshot({
-    path: test.info().outputPath("output-comparison.png"),
-  });
-  await page.goto(themeUrl + "/roadmap");
-  await addItem(page, "項目だけの学習");
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "アウトプット", exact: true }),
-  );
-  await expect(
-    page.getByRole("heading", { name: "アウトプット", level: 1, exact: true }),
-  ).toBeVisible();
-  await saveLearning(page, "項目の説明");
-  await lastRecord(page);
-  await expect(
-    page.getByText("過去のアウトプットと比べる", { exact: true }),
-  ).toHaveCount(0);
-});
-test("final Phase 3 reflection fields are optional, persistent, editable, and included in the AI prompt", async ({
-  page,
-}) => {
-  await page.goto("/");
-  await createTheme(page);
-  await openRoadmap(page);
-  await addItem(page, "需要と供給");
-  await activate(
-    page
-      .getByRole("navigation", { name: "項目の学習" })
-      .getByRole("link", { name: "理解を深める", exact: true }),
-  );
-  await expect(
-    page.getByRole("heading", { name: "理解を深める", level: 1, exact: true }),
-  ).toBeVisible();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await expect(
-    page.getByLabel("自分で考えた問い", { exact: true }),
-  ).toHaveValue("需要と供給とは？");
-  await activate(page.getByText("自分の考え・気づきを残す", { exact: false }));
-  await page
-    .getByLabel("自分の仮説・考え", { exact: true })
-    .fill("買う量と売る量の関係だと思う");
-  await page
-    .getByLabel("不明点", { exact: true })
-    .fill("価格との関係を確認したい");
-  await page
-    .getByLabel("新たな気づき", { exact: false })
-    .fill("条件を分けて考える");
-  await waitForDraft(page);
-  await page.reload();
-  await activate(page.getByRole("button", { name: "学習を記録", exact: true }));
-  await activate(page.getByText("自分の考え・気づきを残す", { exact: false }));
-  await expect(
-    page.getByLabel("自分の仮説・考え", { exact: true }),
-  ).toHaveValue("買う量と売る量の関係だと思う");
-  await expect(page.getByLabel("不明点", { exact: true })).toHaveValue(
-    "価格との関係を確認したい",
-  );
-  await page.setViewportSize({ width: 320, height: 640 });
-  await expect(
-    page.getByRole("button", { name: "学習を保存", exact: true }),
-  ).toBeInViewport();
-  expect(
-    await page.evaluate(
-      () => document.documentElement.scrollWidth <= innerWidth,
-    ),
-  ).toBe(true);
-  await page.screenshot({
-    path: test.info().outputPath("deepening-reflections.png"),
-  });
-  await activate(
-    page.getByRole("button", { name: "保存して外部AIへ", exact: true }),
-  );
-  await expect(page.getByRole("dialog")).toBeVisible();
-  const { prompt, document } = await promptDocument(page);
-  expect(prompt).toContain("買う量と売る量の関係だと思う");
-  expect(prompt).toContain("価格との関係を確認したい");
-  expect(document.version).toBe(3);
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
-  await activate(page.getByRole("button", { name: "記録を編集", exact: true }));
-  await activate(page.getByText("自分の考え・気づきを残す", { exact: false }));
-  await page
-    .getByLabel("不明点", { exact: true })
-    .fill("条件による変化も確認する");
-  await activate(page.getByRole("button", { name: "学習を保存", exact: true }));
-  await expect(page.getByRole("dialog")).toHaveCount(0);
-  await activate(page.getByText("自分の考え・気づき", { exact: true }));
-  await expect(
-    page.getByText("条件による変化も確認する", { exact: true }),
-  ).toBeVisible();
 });

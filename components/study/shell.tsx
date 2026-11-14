@@ -1,15 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ArrowLeft,
-  BookOpen,
-  House,
-  History,
-  Settings2,
-  HardDrive,
-  RotateCw,
-} from "lucide-react";
+import { ArrowLeft, BookOpen, House, Settings2, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
@@ -21,11 +13,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const isThemeDetail = /^\/themes\/[^/]+\/?$/.test(path);
   const { loading, error, refresh } = useStudy();
-  const links = [
-    { href: "/", label: "ホーム", icon: House },
-    { href: "/history", label: "記録", icon: History },
-    { href: "/settings", label: "設定", icon: Settings2 },
-  ];
+  const links = [{ href: "/", label: "ホーム", icon: House }];
   return (
     <div className="app-shell">
       <PencilDefinitions />
@@ -43,14 +31,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <Link href="/" className="brand" aria-label="TRACE Note ホーム">
           <TraceWordmark />
         </Link>
-        <span
-          className={cn(
-            "storage-label",
-            isThemeDetail && "theme-storage-label",
-          )}
-        >
-          <HardDrive size={13} strokeWidth={1.5} /> この端末に保存
-        </span>
+        <Link href="/settings" className="header-settings" aria-label="設定">
+          <Settings2 size={19} strokeWidth={1.5} />
+        </Link>
       </header>
       <main id="main" className="main-content">
         {loading ? (

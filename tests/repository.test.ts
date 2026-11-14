@@ -26,6 +26,7 @@ import { inferSubjectIcon, type SubjectIconKey } from "../lib/subject-icons";
 import { latestMastery, latestOutput, masteryCounts } from "../lib/ratings";
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { itemHref, studyReturnHref } from "../lib/learning-context";
 import { openDB } from "idb";
 import { IndexedDBStudyRepository } from "../lib/storage/indexed-db";
 import { latestCompletion, progress, type LegacyTheme } from "../lib/model";
@@ -37,6 +38,143 @@ function repository(name = crypto.randomUUID()) {
 }
 afterEach(async () => {
   await Promise.all(connections.splice(0).map((repo) => repo.close()));
+});
+
+test("unsaved question AI work persists per target without creating records, then commits question and feedback together", async () => {
+  const { repo, theme, itemTarget, themeTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "需要とは？",
+  };
+  const now = "2026-11-01T12:00:00.000Z";
+  const pending = {
+    id: crypto.randomUUID(),
+    themeId: theme.id,
+    targetType: draft.targetType,
+    targetId: draft.targetId,
+    activity: "deepen" as const,
+    note: draft.question,
+    question: draft.question,
+    questionKind: draft.questionKind,
+    studiedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const source = JSON.stringify(feedbackExample(pending));
+  const value = {
+    ...draft,
+    feedback: {
+      record: pending,
+      workflow: {
+        ...initialFeedbackDraft(
+          pending,
+          buildFeedbackPrompt(pending, theme, "経済学"),
+        ),
+        active: true,
+        step: "preview" as const,
+        source,
+        copied: true,
+      },
+    },
+  };
+  await repo.saveLearningDraft(value);
+  const other = {
+    ...initialLearningDraft(theme.id, themeTarget, "deepen"),
+    question: "テーマへの問い",
+  };
+  await repo.saveLearningDraft(other);
+  await repo.close();
+  assert.deepEqual(await repo.getLearningDraft(value.key), value);
+  assert.deepEqual(await repo.listRecords(), []);
+  assert.deepEqual(await repo.listFeedbacks(), []);
+  const saved = await repo.saveLearningRecord(value, source);
+  assert.equal(saved.id, pending.id);
+  assert.equal(saved.question, draft.question);
+  assert.equal((await repo.listFeedbacks())[0].recordId, saved.id);
+  assert.equal(await repo.getLearningDraft(value.key), undefined);
+  assert.deepEqual(await repo.getLearningDraft(other.key), other);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+  assert.equal((await repo.getTheme(theme.id))!.updatedAt > now, true);
+});
+
+test("pending AI imports reject malformed, mismatched and changed questions and roll back all writes on failure", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  const draft = {
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "原因は？",
+  };
+  const now = new Date().toISOString();
+  const pending = {
+    id: crypto.randomUUID(),
+    themeId: theme.id,
+    targetType: draft.targetType,
+    targetId: draft.targetId,
+    activity: "deepen" as const,
+    note: draft.question,
+    question: draft.question,
+    questionKind: draft.questionKind,
+    studiedAt: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const doc = feedbackExample(pending);
+  const source = JSON.stringify(doc);
+  const value = {
+    ...draft,
+    feedback: {
+      record: pending,
+      workflow: { ...initialFeedbackDraft(pending, "プロンプト"), source },
+    },
+  };
+  await repo.saveLearningDraft(value);
+  const before = await repo.getTheme(theme.id);
+  for (const [candidate, json] of [
+    [value, "{"],
+    [value, JSON.stringify({ ...doc, targetId: "other" })],
+    [{ ...value, question: "別の問い" }, source],
+  ] as const)
+    await assert.rejects(repo.saveLearningRecord(candidate, json));
+  for (const store of ["learning-feedback", "learning-drafts"]) {
+    const operation = store === "learning-feedback" ? "add" : "delete";
+    const original = IDBObjectStore.prototype[operation];
+    Object.defineProperty(IDBObjectStore.prototype, operation, {
+      configurable: true,
+      writable: true,
+      value: function (this: IDBObjectStore, ...args: unknown[]) {
+        if (this.name === store)
+          throw new DOMException("Quota", "QuotaExceededError");
+        return (original as (...values: unknown[]) => IDBRequest).apply(
+          this,
+          args,
+        );
+      },
+    });
+    try {
+      await assert.rejects(repo.saveLearningRecord(value, source));
+    } finally {
+      Object.defineProperty(IDBObjectStore.prototype, operation, {
+        configurable: true,
+        writable: true,
+        value: original,
+      });
+    }
+    assert.deepEqual(await repo.listRecords(), []);
+    assert.deepEqual(await repo.listFeedbacks(), []);
+    assert.deepEqual(await repo.getTheme(theme.id), before);
+    assert.deepEqual(await repo.getLearningDraft(value.key), value);
+  }
+});
+
+test("return links are derived from the validated target and encode IDs", () => {
+  assert.equal(
+    itemHref("theme/a", "item?b"),
+    "/themes/theme%2Fa/items/item%3Fb",
+  );
+  assert.equal(studyReturnHref("t", { type: "theme", id: "t" }), "/themes/t");
+  assert.equal(
+    studyReturnHref("t", { type: "item", id: "i" }),
+    "/themes/t/items/i",
+  );
 });
 async function setup() {
   const repo = repository();
@@ -1471,7 +1609,7 @@ test("both feedback prompts produce the exact versioned schema and reject malfor
     if (activity === "deepen") {
       assert.equal(document.version, 3);
       assert.match(prompt, /簡潔な定義/);
-      assert.match(prompt, /自分の仮説と考え/);
+      assert.match(prompt, /自分の問い/);
       assert.deepEqual(
         parseFeedbackJSON(JSON.stringify(feedbackExample(record, 1))),
         feedbackExample(record, 1),
@@ -1785,7 +1923,7 @@ test("optional reflections resume and can be edited or cleared without losing ol
   );
   assert.equal(cleared.createdAt, first.createdAt);
 });
-test("deepening v3 uses the learner explanation and preserves versioned feedback separately", async () => {
+test("deepening v3 follows the question and preserves legacy reflections and versioned feedback separately", async () => {
   const { repo, theme, itemTarget } = await learningSetup();
   const record = await repo.saveLearningRecord({
     ...initialLearningDraft(theme.id, itemTarget, "deepen"),
@@ -1796,16 +1934,14 @@ test("deepening v3 uses the learner explanation and preserves versioned feedback
   });
   const prompt = buildFeedbackPrompt(record, theme, "経済学");
   for (const text of [
-    "買いたい量",
-    "所得との関係",
-    "価格の条件がある",
-    "仮説の妥当性",
+    "需要とは？",
     "反例",
     "別の視点",
     "簡潔な定義",
     "似た概念との違い",
   ])
     assert.ok(prompt.includes(text));
+  assert.ok(!prompt.includes("買いたい量"));
   const document = parseFeedbackJSON(prompt.split("\n\n").at(-1)!);
   assert.equal(document.version, 3);
   for (const field of [

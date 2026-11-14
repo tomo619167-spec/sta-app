@@ -19,30 +19,51 @@ import { usePersistentDraft } from "./use-persistent-draft";
 import { JSONSource } from "./json-source";
 import { FeedbackBody } from "./feedback-body";
 import { useStudy } from "./provider";
+import { SavedActions } from "./saved-actions";
+import type { FeedbackDraft } from "@/lib/learning-feedback";
+export interface DraftFeedbackSession {
+  key: string;
+  load: () => Promise<FeedbackDraft | undefined>;
+  save: (value: FeedbackDraft) => Promise<void>;
+  import: (source: string) => Promise<StudyRecord>;
+  onClose: () => void;
+  onSaved: (record: StudyRecord) => void;
+}
 export function FeedbackWorkflow({
   record,
   theme,
   subject,
   item,
   autoOpen = false,
+  draftSession,
+  onSaved,
 }: {
   record: StudyRecord;
   theme: Theme;
   subject: string;
   item?: StudyItem;
   autoOpen?: boolean;
+  draftSession?: DraftFeedbackSession;
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const { refresh } = useStudy();
   const prompt = buildFeedbackPrompt(record, theme, subject, item);
-  const state = usePersistentDraft(record.id, {
-    load: () => studyRepository.getFeedbackDraft(record.id),
-    save: (value) => studyRepository.saveFeedbackDraft(value),
+  const state = usePersistentDraft(draftSession?.key ?? record.id, {
+    load: () =>
+      draftSession
+        ? draftSession.load()
+        : studyRepository.getFeedbackDraft(record.id),
+    save: (value) =>
+      draftSession
+        ? draftSession.save(value)
+        : studyRepository.saveFeedbackDraft(value),
     initial: () => initialFeedbackDraft(record, prompt),
   });
   const { data, update } = state;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [completed, setCompleted] = useState(false);
   const lock = useRef(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const started = useRef(false);
@@ -100,10 +121,19 @@ export function FeedbackWorkflow({
     setBusy(true);
     try {
       await state.flush();
-      await studyRepository.importFeedback(record.id, data.source);
+      const saved = draftSession
+        ? await draftSession.import(data.source)
+        : undefined;
+      if (!draftSession)
+        await studyRepository.importFeedback(record.id, data.source);
       state.clear();
       await refresh();
-      router.replace(`/records/${record.id}`);
+      if (draftSession && saved) draftSession.onSaved(saved);
+      else {
+        if (onSaved) onSaved();
+        else setCompleted(true);
+        router.replace(`/records/${record.id}`);
+      }
     } catch (error) {
       setError(
         error instanceof Error &&
@@ -119,19 +149,28 @@ export function FeedbackWorkflow({
   function close() {
     update({ active: false });
     setError("");
-    if (autoOpen) router.replace(`/records/${record.id}`);
+    if (draftSession) draftSession.onClose();
+    else if (autoOpen) router.replace(`/records/${record.id}`);
   }
   return (
     <>
-      <Button
-        variant="outline"
-        disabled={state.loading || !data}
-        onClick={() => update({ active: true })}
-      >
-        {record.activity === "output"
-          ? "外部AIでフィードバック"
-          : "外部AIに相談"}
-      </Button>
+      {completed && (
+        <SavedActions
+          themeId={theme.id}
+          target={{ type: record.targetType, id: record.targetId }}
+        />
+      )}
+      {!draftSession && (
+        <Button
+          variant="outline"
+          disabled={state.loading || !data}
+          onClick={() => update({ active: true })}
+        >
+          {record.activity === "output"
+            ? "外部AIでフィードバック"
+            : "外部AIに相談"}
+        </Button>
+      )}
       {state.error && !data?.active && (
         <DraftStatus
           error={state.error}

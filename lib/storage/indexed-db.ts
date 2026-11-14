@@ -8,6 +8,7 @@ import {
 import {
   parseFeedbackJSON,
   validateFeedbackDraft,
+  validateDraftFeedback,
   assertFeedbackContext,
   type FeedbackDraft,
   type LearningFeedback,
@@ -784,10 +785,12 @@ export class IndexedDBStudyRepository implements StudyRepository {
   }
   async getLearningDraft(key: string) {
     const draft = await (await this.db()).get("learning-drafts", key);
+    if (draft) validateDraftFeedback(draft);
     return draft ? validateLearningDraft(draft) : undefined;
   }
   async saveLearningDraft(draft: LearningDraft) {
     const value = validateLearningDraft(draft);
+    validateDraftFeedback(value);
     const tx = (await this.db()).transaction(learningStores, "readwrite");
     try {
       await learningTarget(tx, value.themeId, {
@@ -812,9 +815,26 @@ export class IndexedDBStudyRepository implements StudyRepository {
       throw error;
     }
   }
-  async saveLearningRecord(draft: LearningDraft) {
+  async saveLearningRecord(draft: LearningDraft, feedbackSource?: string) {
     const value = validateLearningDraft(draft);
     const input = validateLearningInput(value);
+    const document =
+      feedbackSource === undefined
+        ? undefined
+        : parseFeedbackJSON(feedbackSource);
+    if (document) {
+      validateDraftFeedback(value);
+      if (
+        !value.feedback ||
+        value.recordId ||
+        value.feedback.record.question !== input.question ||
+        value.feedback.record.questionKind !== input.questionKind
+      )
+        throw new Error(
+          "問いが変更されています。プロンプトを作り直してください。",
+        );
+      assertFeedbackContext(document, value.feedback.record);
+    }
     const tx = (await this.db()).transaction(learningStores, "readwrite");
     try {
       const theme = await learningTarget(tx, value.themeId, {
@@ -837,12 +857,16 @@ export class IndexedDBStudyRepository implements StudyRepository {
         throw new Error(
           "記録が更新されています。画面を開き直して確認してください。",
         );
-      const now = new Date(
-        Math.max(Date.now(), old ? Date.parse(recordRevision(old)) + 1 : 0),
-      ).toISOString();
+      const now = document
+        ? recordRevision(value.feedback!.record)
+        : new Date(
+            Math.max(Date.now(), old ? Date.parse(recordRevision(old)) + 1 : 0),
+          ).toISOString();
       const record: StudyRecord = {
         ...old,
-        id: old?.id ?? crypto.randomUUID(),
+        id:
+          old?.id ??
+          (document ? value.feedback!.record.id : crypto.randomUUID()),
         themeId: value.themeId,
         targetType: value.targetType,
         targetId: value.targetId,
@@ -868,11 +892,30 @@ export class IndexedDBStudyRepository implements StudyRepository {
         createdAt: old?.createdAt ?? old?.studiedAt ?? now,
         updatedAt: now,
       };
+      if (document) {
+        if (await tx.objectStore("records").get(record.id))
+          throw new Error(
+            "記録IDが重複しています。プロンプトを作り直してください。",
+          );
+        assertFeedbackContext(document, record);
+        await tx.objectStore("learning-feedback").add({
+          id: crypto.randomUUID(),
+          themeId: record.themeId,
+          recordId: record.id,
+          targetType: record.targetType,
+          targetId: record.targetId,
+          createdAt: new Date().toISOString(),
+          document,
+          snapshot: recordSnapshot(record),
+        });
+      }
       await tx.objectStore("records").put(record);
       await tx.objectStore("themes").put({
         ...theme,
-        lastStudiedAt: old ? theme.lastStudiedAt : now,
-        updatedAt: now,
+        lastStudiedAt: old
+          ? theme.lastStudiedAt
+          : [theme.lastStudiedAt ?? "", now].sort().at(-1)!,
+        updatedAt: new Date().toISOString(),
       });
       await tx.objectStore("learning-drafts").delete(value.key);
       await tx.done;

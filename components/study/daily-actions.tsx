@@ -19,7 +19,7 @@ export function DailyActions({
       <Button asChild variant="outline">
         <Link href={learningHref(themeId, "output", itemId, fromTheme)}>
           <PenLine />
-          <span>アウトプット</span>
+          <span>自分の言葉で説明する</span>
         </Link>
       </Button>
       <Button asChild variant="outline">

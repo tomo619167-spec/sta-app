@@ -40,3 +40,11 @@ export function examHref(subjectId: string, themeId?: string) {
 export function themeHref(themeId: string, itemId?: string) {
   return `/themes/${encodeURIComponent(themeId)}${itemId === undefined ? "" : `?item=${encodeURIComponent(itemId)}`}`;
 }
+export function itemHref(themeId: string, itemId: string) {
+  return `/themes/${encodeURIComponent(themeId)}/items/${encodeURIComponent(itemId)}`;
+}
+export function studyReturnHref(themeId: string, target: StudyTarget) {
+  return target.type === "item"
+    ? itemHref(themeId, target.id)
+    : themeHref(themeId);
+}

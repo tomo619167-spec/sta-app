@@ -219,3 +219,98 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Phase 3.5: quiet lists, one place for item management, clear next steps. */
+.item-links {
+  list-style: none;
+  padding: 0;
+}
+.item-links .roadmap-item {
+  padding: 0;
+  margin-left: 0;
+}
+.item-links .roadmap-item::before,
+.item-links .roadmap-item::after {
+  display: none;
+}
+.item-detail-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 76px;
+  padding: var(--space-3) 0;
+  color: inherit;
+  text-decoration: none;
+}
+.item-detail-link .mastery-dot {
+  position: static;
+  flex-shrink: 0;
+}
+.item-detail-link:hover .item-title-state > span:first-child {
+  color: var(--primary);
+}
+.item-detail-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-block: var(--space-4);
+}
+.item-detail-heading h1 {
+  font-size: var(--text-title-small);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.item-detail-goal {
+  margin-block: var(--space-4);
+}
+.item-detail-goal h2 {
+  font-family: var(--font-sans);
+  font-size: var(--text-small);
+  color: var(--muted-foreground);
+  margin-bottom: var(--space-2);
+}
+.item-detail-goal p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.item-detail-page .daily-actions {
+  margin-top: var(--space-5);
+}
+.daily-actions span {
+  overflow-wrap: anywhere;
+}
+.saved-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  margin-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+.saved-actions p {
+  color: var(--primary);
+  margin: 0;
+}
+.item-management-link {
+  margin-block: var(--space-5);
+  min-height: var(--tap-size);
+  display: inline-flex;
+  align-items: center;
+}
+.header-settings {
+  display: grid;
+  place-items: center;
+  width: var(--tap-size);
+  height: var(--tap-size);
+  color: var(--foreground);
+  justify-self: end;
+}
+.bottom-nav {
+  grid-template-columns: 1fr;
+}
+.bottom-nav .nav-link {
+  max-width: 180px;
+  width: 100%;
+  justify-self: center;
+}
