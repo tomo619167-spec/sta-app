@@ -1,9 +1,10 @@
 import type { StudyRecord } from "./model";
-export type RecordFilter = "all" | "output" | "deepen";
+export type RecordFilter = "all" | "output" | "deepen" | "focus";
 export const recordFilters: { value: RecordFilter; label: string }[] = [
   { value: "all", label: "すべて" },
   { value: "output", label: "説明" },
   { value: "deepen", label: "理解" },
+  { value: "focus", label: "集中" },
 ];
 export function filterRecords(records: StudyRecord[], filter: RecordFilter) {
   return records.filter(

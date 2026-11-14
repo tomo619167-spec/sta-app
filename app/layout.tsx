@@ -1,3 +1,4 @@
+import { FocusProvider } from "@/components/study/focus-provider";
 import type { Metadata, Viewport } from "next";
 import { StudyProvider } from "@/components/study/provider";
 import { Shell } from "@/components/study/shell";
@@ -26,7 +27,9 @@ export default function RootLayout({
     <html lang="ja">
       <body>
         <StudyProvider>
-          <Shell>{children}</Shell>
+          <FocusProvider>
+            <Shell>{children}</Shell>
+          </FocusProvider>
         </StudyProvider>
       </body>
     </html>

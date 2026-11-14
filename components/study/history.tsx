@@ -1,5 +1,5 @@
 "use client";
-import Link from "next/link";
+import { FocusNote } from "./focus-note";
 import { useState } from "react";
 import { useStudy } from "./provider";
 import { BackLink } from "./shared";
@@ -20,7 +20,7 @@ export function HistoryScreen({
   initialTheme?: string;
   initialItem?: string;
 }) {
-  const { records, themes, subjects, items } = useStudy();
+  const { records, themes, subjects, items, focusSessions } = useStudy();
   const [subjectFilter, setSubjectFilter] = useState("");
   const [itemFilter, setItemFilter] = useState(initialItem);
   const [filter, setFilter] = useState(initialTheme);
@@ -58,6 +58,30 @@ export function HistoryScreen({
     (record) =>
       matching(record) && (!targetFilter || record.targetType === targetFilter),
   );
+  const focused =
+    activityFilter === "all" || activityFilter === "focus"
+      ? focusSessions.filter(
+          (session) =>
+            (!selected || session.target.themeId === selected) &&
+            (!subjectFilter || session.target.subjectId === subjectFilter) &&
+            (!itemFilter ||
+              (session.targetType === "item" &&
+                session.targetId === itemFilter)) &&
+            (!targetFilter || session.targetType === targetFilter),
+        )
+      : [];
+  const entries = [
+    ...filtered.map((record) => ({
+      kind: "study" as const,
+      record,
+      date: record.studiedAt,
+    })),
+    ...focused.map((session) => ({
+      kind: "focus" as const,
+      session,
+      date: session.endedAt,
+    })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
   if (invalidScope)
     return (
       <>
@@ -162,6 +186,8 @@ export function HistoryScreen({
             onChange={(e) => setTargetFilter(e.target.value)}
           >
             <option value="">すべての対象</option>
+            <option value="none">指定なし</option>
+            <option value="subject">科目</option>
             <option value="theme">テーマ全体</option>
             <option value="item">学習項目</option>
           </select>
@@ -169,12 +195,20 @@ export function HistoryScreen({
       </details>
       <div className="section-heading">
         <h2>
-          学習記録 <span className="count">{filtered.length}</span>
+          学習記録 <span className="count">{entries.length}</span>
         </h2>
       </div>
-      {filtered.length ? (
+      {entries.length ? (
         <div className="notebook-records">
-          {filtered.map((record) => {
+          {entries.map((entry) => {
+            if (entry.kind === "focus")
+              return (
+                <FocusNote
+                  key={`focus:${entry.session.id}`}
+                  session={entry.session}
+                />
+              );
+            const { record } = entry;
             const targetName =
               record.targetType === "item"
                 ? (items.find((entry) => entry.id === record.targetId)?.title ??

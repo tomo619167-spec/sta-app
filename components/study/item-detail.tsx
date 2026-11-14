@@ -25,7 +25,15 @@ export function ItemDetail({
   themeId: string;
   itemId: string;
 }) {
-  const { themes, items, subjects, records, feedbacks, refresh } = useStudy();
+  const {
+    themes,
+    items,
+    subjects,
+    records,
+    feedbacks,
+    focusSessions,
+    refresh,
+  } = useStudy();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -108,7 +116,17 @@ export function ItemDetail({
         </section>
       )}
       <DailyActions themeId={themeId} itemId={itemId} />
-      {own.length > 0 && (
+      <Link
+        className="text-link item-management-link"
+        href={`/timer?type=item&target=${encodeURIComponent(itemId)}`}
+      >
+        この項目に集中する
+      </Link>
+      {(own.length > 0 ||
+        focusSessions.some(
+          (session) =>
+            session.targetType === "item" && session.targetId === itemId,
+        )) && (
         <RecentRecords
           records={own}
           feedbacks={ai}
@@ -140,7 +158,7 @@ export function ItemDetail({
           <DialogTitle>学習項目を削除しますか？</DialogTitle>
           <DialogDescription>
             「{item.title}
-            」と、この項目の記録・AIフィードバックを削除します。元に戻せません。
+            」と、この項目の説明・問い・AIフィードバックを削除します。元に戻せません。集中時間の記録は残します。
           </DialogDescription>
           {error && <p role="alert">{error}</p>}
           <div className="dialog-actions">

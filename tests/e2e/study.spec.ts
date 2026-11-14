@@ -869,10 +869,10 @@ test("3.5 lists show correct counts and whole-row links without menus or assessm
     page
       .getByRole("navigation", { name: "メインナビゲーション" })
       .getByRole("link"),
-  ).toHaveText(["ホーム"]);
+  ).toHaveText(["ホーム", "タイマー"]);
   await expect(
     page.getByRole("navigation", { name: "メインナビゲーション" }),
-  ).not.toContainText("タイマー");
+  ).toContainText("タイマー");
   await activate(page.getByRole("link", { name: "設定", exact: true }));
   await expect(
     page.getByRole("heading", { name: "設定", level: 1 }),

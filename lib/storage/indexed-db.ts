@@ -1,4 +1,12 @@
 import {
+  initialFocusState,
+  resolveFocusTarget,
+  transitionFocus,
+  type FocusState,
+  type FocusSession,
+  type FocusCommand,
+} from "../focus";
+import {
   validateLearningDraft,
   validateLearningInput,
   recordRevision,
@@ -54,6 +62,8 @@ import {
 import { sortStudyItems } from "../roadmap";
 import type { StudyRepository } from "./repository";
 interface StudyDB extends DBSchema {
+  "focus-state": { key: string; value: FocusState };
+  "focus-sessions": { key: string; value: FocusSession };
   "learning-drafts": {
     key: string;
     value: LearningDraft;
@@ -141,10 +151,15 @@ export class IndexedDBStudyRepository implements StudyRepository {
   constructor(private readonly name = "yohaku-study") {}
   private db() {
     if (!this.connection)
-      this.connection = openDB<StudyDB>(this.name, 6, {
+      this.connection = openDB<StudyDB>(this.name, 7, {
         upgrade(db, oldVersion, _newVersion, tx) {
           // The open request reports upgrade failures; also consume tx.done.
           void tx.done.catch(() => {});
+          if (oldVersion < 7) {
+            // Additive only: no existing store, record or assessment is rewritten.
+            db.createObjectStore("focus-state", { keyPath: "id" });
+            db.createObjectStore("focus-sessions", { keyPath: "id" });
+          }
           let migrateHierarchy: Promise<void> = Promise.resolve();
           if (oldVersion < 1) {
             db.createObjectStore("themes", { keyPath: "id" });
@@ -316,6 +331,57 @@ export class IndexedDBStudyRepository implements StudyRepository {
         throw error;
       });
     return this.connection;
+  }
+  async getFocusState() {
+    return (
+      (await (await this.db()).get("focus-state", "timer")) ??
+      initialFocusState()
+    );
+  }
+  async listFocusSessions() {
+    return (await (await this.db()).getAll("focus-sessions")).sort((a, b) =>
+      b.endedAt.localeCompare(a.endedAt),
+    );
+  }
+  async deleteFocusSession(id: string) {
+    const db = await this.db();
+    await db.delete("focus-sessions", id);
+  }
+  async updateFocus(command: FocusCommand, now = Date.now()) {
+    const tx = (await this.db()).transaction(
+      ["focus-state", "focus-sessions", "subjects", "themes", "items"],
+      "readwrite",
+    );
+    try {
+      const previous =
+        (await tx.objectStore("focus-state").get("timer")) ??
+        initialFocusState();
+      const target =
+        command.type === "start" &&
+        (!previous.timer || previous.timer.status === "finished")
+          ? resolveFocusTarget(
+              command.target,
+              await tx.objectStore("subjects").getAll(),
+              await tx.objectStore("themes").getAll(),
+              await tx.objectStore("items").getAll(),
+            )
+          : undefined;
+      const result = transitionFocus(previous, command, now, target);
+      if (
+        result.session &&
+        !(await tx.objectStore("focus-sessions").get(result.session.id))
+      )
+        await tx.objectStore("focus-sessions").add(result.session);
+      if (result.state !== previous) {
+        result.state = { ...result.state, revision: previous.revision + 1 };
+        await tx.objectStore("focus-state").put(result.state);
+      }
+      await tx.done;
+      return result.state;
+    } catch (error) {
+      await abortTransaction(tx);
+      throw error;
+    }
   }
   async getRoadmapDraft(themeId: string) {
     const value = await (await this.db()).get("roadmap-drafts", themeId);

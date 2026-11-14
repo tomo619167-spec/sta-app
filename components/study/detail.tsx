@@ -151,9 +151,9 @@ export function DetailScreen({
       </section>
       <div className="focus-section">
         <Button asChild className="focus-button">
-          <Link href={`/themes/${id}/pomodoro`}>
+          <Link href={`/timer?type=theme&target=${encodeURIComponent(id)}`}>
             <Timer />
-            集中する<small>準備中</small>
+            集中する
           </Link>
         </Button>
       </div>
@@ -183,7 +183,8 @@ export function DetailScreen({
             テーマを削除しますか？
           </DialogTitle>
           <DialogDescription className="dialog-description">
-            「{theme.name}」と学習項目・記録を削除します。元に戻せません。
+            「{theme.name}
+            」と学習項目・説明・問いの記録を削除します。元に戻せません。集中時間の記録は残します。
           </DialogDescription>
           {error && (
             <p role="alert" className="form-error">

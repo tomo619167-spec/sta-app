@@ -1,4 +1,5 @@
 "use client";
+import type { FocusSession } from "@/lib/focus";
 import type { LearningFeedback } from "@/lib/learning-feedback";
 import {
   createContext,
@@ -19,6 +20,7 @@ import type {
 } from "@/lib/model";
 import type { SubjectIconSetting } from "@/lib/subject-icons";
 interface StudyState {
+  focusSessions: FocusSession[];
   feedbacks: LearningFeedback[];
   subjectIcons: SubjectIconSetting[];
   masteryHistory: MasteryChange[];
@@ -32,6 +34,7 @@ interface StudyState {
 }
 const Context = createContext<StudyState | null>(null);
 export function StudyProvider({ children }: { children: ReactNode }) {
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>([]);
   const [feedbacks, setFeedbacks] = useState<LearningFeedback[]>([]);
   const [subjectIcons, setSubjectIcons] = useState<SubjectIconSetting[]>([]);
   const [masteryHistory, setMasteryHistory] = useState<MasteryChange[]>([]);
@@ -46,17 +49,27 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     try {
-      const [themes, records, subjects, items, icons, history, feedbacks] =
-        await Promise.all([
-          studyRepository.listThemes(),
-          studyRepository.listRecords(),
-          studyRepository.listSubjects(),
-          studyRepository.listItems(),
-          studyRepository.listSubjectIcons(),
-          studyRepository.listMasteryHistory(),
-          studyRepository.listFeedbacks(),
-        ]);
+      const [
+        themes,
+        records,
+        subjects,
+        items,
+        icons,
+        history,
+        feedbacks,
+        focusSessions,
+      ] = await Promise.all([
+        studyRepository.listThemes(),
+        studyRepository.listRecords(),
+        studyRepository.listSubjects(),
+        studyRepository.listItems(),
+        studyRepository.listSubjectIcons(),
+        studyRepository.listMasteryHistory(),
+        studyRepository.listFeedbacks(),
+        studyRepository.listFocusSessions(),
+      ]);
       if (request !== generation.current) return;
+      setFocusSessions(focusSessions);
       setFeedbacks(feedbacks);
       setSubjectIcons(icons);
       setMasteryHistory(history);
@@ -92,6 +105,7 @@ export function StudyProvider({ children }: { children: ReactNode }) {
   return (
     <Context.Provider
       value={{
+        focusSessions,
         themes,
         feedbacks,
         subjectIcons,
