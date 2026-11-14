@@ -16,7 +16,10 @@ import type {
 export interface StudyRepository {
   getLearningDraft(key: string): Promise<LearningDraft | undefined>;
   saveLearningDraft(draft: LearningDraft): Promise<void>;
-  saveLearningRecord(draft: LearningDraft): Promise<StudyRecord>;
+  saveLearningRecord(
+    draft: LearningDraft,
+    feedbackSource?: string,
+  ): Promise<StudyRecord>;
   deleteRecord(id: string): Promise<void>;
   listFeedbacks(): Promise<LearningFeedback[]>;
   getFeedbackDraft(recordId: string): Promise<FeedbackDraft | undefined>;

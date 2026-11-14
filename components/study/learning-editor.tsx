@@ -26,6 +26,11 @@ import { FourLevelPicker } from "./four-level-picker";
 import { useStudy } from "./provider";
 import { usePersistentDraft } from "./use-persistent-draft";
 import { DraftStatus } from "./draft-status";
+import { FeedbackWorkflow } from "./feedback-workflow";
+import {
+  buildFeedbackPrompt,
+  initialFeedbackDraft,
+} from "@/lib/learning-feedback";
 const questionIcons = {
   definition: BookOpen,
   why: CircleHelp,
@@ -53,7 +58,7 @@ export function LearningEditor({
   record?: StudyRecord;
   open: boolean;
   onClose: () => void;
-  onSaved: (record: StudyRecord, ai: boolean) => void;
+  onSaved: (record: StudyRecord) => void;
 }) {
   const state = usePersistentDraft(
     learningDraftKey(activity, target, record?.id),
@@ -86,6 +91,7 @@ export function LearningEditor({
   const [error, setError] = useState("");
   const lock = useRef(false);
   const [suggestedKind, setSuggestedKind] = useState<QuestionKind>();
+  const [resetAI, setResetAI] = useState(false);
   function applyKind(kind: QuestionKind, question: string) {
     state.update({ questionKind: kind, question });
     setSuggestedKind(undefined);
@@ -103,7 +109,7 @@ export function LearningEditor({
       setSuggestedKind(kind);
     }
   }
-  async function save(ai = false) {
+  async function save() {
     if (!state.data || lock.current) return;
     if (stale) {
       setError("記録が更新されています。最新の記録を確認してください。");
@@ -123,7 +129,7 @@ export function LearningEditor({
       const saved = await studyRepository.saveLearningRecord(state.data);
       state.clear();
       await refresh();
-      onSaved(saved, ai);
+      onSaved(saved);
       onClose();
     } catch (error) {
       setError(
@@ -137,10 +143,106 @@ export function LearningEditor({
       setBusy(false);
     }
   }
-  const { refresh } = useStudy();
+  const { refresh, themes, subjects, items } = useStudy();
   const value = state.data;
+  const theme = themes.find((entry) => entry.id === themeId);
+  const item =
+    target.type === "item"
+      ? items.find(
+          (entry) => entry.id === target.id && entry.themeId === themeId,
+        )
+      : undefined;
+  const subject =
+    subjects.find((entry) => entry.id === theme?.subjectId)?.name ??
+    theme?.subject ??
+    "";
+  function startAI(replace = false) {
+    if (!value || !theme) return;
+    try {
+      validateLearningInput(value);
+    } catch (error) {
+      setError((error as Error).message);
+      return;
+    }
+    if (
+      value.feedback &&
+      value.feedback.record.question === value.question &&
+      value.feedback.record.questionKind === value.questionKind
+    ) {
+      state.update({
+        feedback: {
+          ...value.feedback,
+          workflow: { ...value.feedback.workflow, active: true },
+        },
+      });
+      return;
+    }
+    if (value.feedback && !replace) {
+      setResetAI(true);
+      return;
+    }
+    const now = new Date().toISOString();
+    const pending: StudyRecord = {
+      id: crypto.randomUUID(),
+      themeId,
+      targetType: target.type,
+      targetId: target.id,
+      activity: "deepen",
+      note: value.question ?? "",
+      question: value.question,
+      questionKind: value.questionKind,
+      studiedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    state.update({
+      feedback: {
+        record: pending,
+        workflow: {
+          ...initialFeedbackDraft(
+            pending,
+            buildFeedbackPrompt(pending, theme, subject, item),
+          ),
+          active: true,
+        },
+      },
+    });
+    setResetAI(false);
+    setError("");
+  }
   const stale =
     record && value && value.baseRevision !== recordRevision(record);
+  if (!record && value?.feedback?.workflow.active && theme) {
+    const session = value.feedback;
+    return (
+      <FeedbackWorkflow
+        key={session.record.id}
+        record={session.record}
+        theme={theme}
+        subject={subject}
+        item={item}
+        autoOpen
+        draftSession={{
+          key: value.key,
+          load: async () => session.workflow,
+          save: async (workflow) => {
+            state.update({ feedback: { record: session.record, workflow } });
+            await state.flush();
+          },
+          import: async (source) => {
+            await state.flush();
+            return studyRepository.saveLearningRecord(value, source);
+          },
+          onClose: () => {},
+          onSaved: (saved) => {
+            state.clear();
+            onSaved(saved);
+            onClose();
+          },
+        }}
+      />
+    );
+  }
   return (
     <EditorDialog
       open={open}
@@ -149,7 +251,7 @@ export function LearningEditor({
         record
           ? "記録を編集"
           : activity === "output"
-            ? "アウトプットを書く"
+            ? "自分の言葉で説明する"
             : "問いを深める"
       }
       onSubmit={(e: FormEvent) => {
@@ -157,7 +259,7 @@ export function LearningEditor({
         void save();
       }}
       busy={busy || state.loading}
-      saveLabel="学習を保存"
+      saveLabel={activity === "deepen" ? "問いを保存" : "説明を保存"}
       error={error}
       footer={
         stale ? (
@@ -196,7 +298,9 @@ export function LearningEditor({
         <fieldset className="workflow-fields" disabled={busy || state.loading}>
           {activity === "output" ? (
             <>
-              <p className="roadmap-hint">何も見ずに、自分の言葉で説明する。</p>
+              <p className="roadmap-hint">
+                覚えていることを、自分の言葉で説明してみましょう。
+              </p>
               <div>
                 <label htmlFor="output-title">タイトル</label>
                 <input
@@ -286,7 +390,7 @@ export function LearningEditor({
                 </div>
               )}
               <div>
-                <label htmlFor="deep-question">自分で考えた問い</label>
+                <label htmlFor="deep-question">自分の問い</label>
                 <textarea
                   id="deep-question"
                   rows={3}
@@ -297,59 +401,32 @@ export function LearningEditor({
                   }
                 />
               </div>
-              <details className="reflection-fields">
-                <summary>
-                  自分の考え・気づきを残す{" "}
-                  <span className="optional-label">任意</span>
-                </summary>
-                <div className="form-stack">
-                  <div>
-                    <label htmlFor="deep-hypothesis">自分の仮説・考え</label>
-                    <textarea
-                      id="deep-hypothesis"
-                      rows={5}
-                      maxLength={15000}
-                      value={value.hypothesis ?? ""}
-                      onChange={(event) =>
-                        state.update({ hypothesis: event.target.value })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="deep-unknowns">不明点</label>
-                    <textarea
-                      id="deep-unknowns"
-                      rows={3}
-                      maxLength={15000}
-                      value={value.unknowns ?? ""}
-                      onChange={(event) =>
-                        state.update({ unknowns: event.target.value })
-                      }
-                    />
-                  </div>
-                  <div>
-                    <label htmlFor="deep-insight">新たな気づき</label>
-                    <textarea
-                      id="deep-insight"
-                      rows={5}
-                      maxLength={15000}
-                      value={value.insight ?? ""}
-                      onChange={(event) =>
-                        state.update({ insight: event.target.value })
-                      }
-                    />
-                  </div>
-                </div>
-              </details>
             </>
           )}
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => void save(true)}
-          >
-            保存して外部AIへ
-          </Button>
+          {activity === "deepen" && !record && (
+            <>
+              {resetAI && (
+                <div role="group" aria-label="AI作業の確認">
+                  <p className="roadmap-hint">
+                    問いが変わりました。以前のAI作業を置き換えますか？
+                  </p>
+                  <Button type="button" onClick={() => startAI(true)}>
+                    新しい問いで作り直す
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setResetAI(false)}
+                  >
+                    キャンセル
+                  </Button>
+                </div>
+              )}
+              <Button type="button" variant="outline" onClick={() => startAI()}>
+                プロンプトを確認
+              </Button>
+            </>
+          )}
         </fieldset>
       )}
       <DraftStatus

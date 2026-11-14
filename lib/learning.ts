@@ -52,6 +52,11 @@ export interface LearningDraft extends LearningInput {
   targetId: string;
   recordId?: string;
   baseRevision?: string;
+  /** External AI work may precede formal question registration. */
+  feedback?: {
+    record: StudyRecord;
+    workflow: import("./learning-feedback").FeedbackDraft;
+  };
 }
 export type OutputDraft = LearningDraft & { activity: "output" };
 export type DeepeningDraft = LearningDraft & { activity: "deepen" };

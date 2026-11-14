@@ -19,6 +19,8 @@ import { LearningEditor } from "./learning-editor";
 import { FeedbackWorkflow } from "./feedback-workflow";
 import { FeedbackBody } from "./feedback-body";
 import { OutputComparison } from "./output-comparison";
+import { SavedActions } from "./saved-actions";
+import { studyReturnHref } from "@/lib/learning-context";
 export function RecordDetail({
   id,
   autoAI = false,
@@ -32,6 +34,7 @@ export function RecordDetail({
   const [deleting, setDeleting] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [saved, setSaved] = useState(false);
   const record = records.find((record) => record.id === id);
   const theme = themes.find((theme) => theme.id === record?.themeId);
   if (!record || !theme)
@@ -69,7 +72,9 @@ export function RecordDetail({
   }
   return (
     <>
-      <BackLink href={historyHref}>記録へ</BackLink>
+      <BackLink href={studyReturnHref(theme.id, target)}>
+        {target.type === "item" ? "学習項目に戻る" : "テーマに戻る"}
+      </BackLink>
       <header className="record-detail-heading">
         <div>
           <p className="subject-label">
@@ -78,7 +83,7 @@ export function RecordDetail({
           </p>
           <h1>
             {record.activity === "output"
-              ? "アウトプット"
+              ? "自分の言葉で説明する"
               : record.activity === "deepen"
                 ? "理解を深める"
                 : "学習メモ"}
@@ -92,6 +97,7 @@ export function RecordDetail({
           onDelete={() => setDeleting(true)}
         />
       </header>
+      {saved && <SavedActions themeId={theme.id} target={target} />}
       <section className="learning-target" aria-label="現在の学習対象">
         <span>{target.type === "theme" ? "テーマ全体" : "学習項目"}</span>
         <h2>{name}</h2>
@@ -169,6 +175,7 @@ export function RecordDetail({
               }
               item={item}
               autoOpen={autoAI}
+              onSaved={() => setSaved(true)}
             />
           )}
         </div>
@@ -203,8 +210,8 @@ export function RecordDetail({
           record={record}
           open
           onClose={() => setEditing(false)}
-          onSaved={(_record, ai) => {
-            if (ai) router.push(`/records/${id}?ai=1`);
+          onSaved={() => {
+            setSaved(true);
           }}
         />
       )}

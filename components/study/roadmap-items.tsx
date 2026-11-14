@@ -1,25 +1,14 @@
 "use client";
 import Link from "next/link";
 import { useId, useState } from "react";
-import { Accordion } from "radix-ui";
-import { Plus, ChevronDown, ArrowUpDown } from "lucide-react";
-import type { StudyItem } from "@/lib/model";
+import { Plus, ChevronRight, ArrowUpDown } from "lucide-react";
 import { latestMastery } from "@/lib/ratings";
 import { MasteryBadge } from "./mastery-badge";
-import { MasteryControl } from "./mastery-control";
-import { studyRepository } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
 import { useStudy } from "./provider";
 import { ReorderItems } from "./reorder-items";
 import { ItemForm } from "./item-form";
-import { ActionMenu } from "./action-menu";
-import { DailyActions } from "./daily-actions";
+import { itemHref } from "@/lib/learning-context";
 export function RoadmapItems({
   themeId,
   initialItemId,
@@ -29,7 +18,7 @@ export function RoadmapItems({
   initialItemId?: string;
   preview?: boolean;
 }) {
-  const { items, masteryHistory, refresh } = useStudy();
+  const { items, masteryHistory } = useStudy();
   const themeItems = items.filter((item) => item.themeId === themeId);
   const listId = useId();
   const previewLimit = 4;
@@ -40,29 +29,10 @@ export function RoadmapItems({
   );
   const visibleItems =
     preview && !showAll ? themeItems.slice(0, previewLimit) : themeItems;
-  const [expanded, setExpanded] = useState<string[]>(
-    initialItemId ? [initialItemId] : [],
-  );
   const [reordering, setReordering] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<StudyItem>();
-  const [deleting, setDeleting] = useState<StudyItem>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  async function remove() {
-    if (busy || !deleting) return;
-    setBusy(true);
-    setError("");
-    try {
-      await studyRepository.deleteItem(deleting.id);
-      await refresh();
-      setDeleting(undefined);
-    } catch {
-      setError("削除できませんでした。再試行してください。");
-    } finally {
-      setBusy(false);
-    }
-  }
   return (
     <section
       className={`items-section${preview ? " items-preview" : ""}`}
@@ -92,7 +62,6 @@ export function RoadmapItems({
             variant="ghost"
             size="sm"
             onClick={() => {
-              setEditing(undefined);
               setFormOpen(true);
             }}
           >
@@ -111,93 +80,42 @@ export function RoadmapItems({
             onError={setError}
           />
         ) : (
-          <Accordion.Root
-            type="multiple"
-            value={expanded}
-            onValueChange={setExpanded}
-            className="roadmap-items"
-            id={listId}
-          >
+          <ol className="roadmap-items item-links" id={listId}>
             {visibleItems.map((item) => {
               const level = latestMastery(masteryHistory, {
                 type: "item",
                 id: item.id,
               });
-              const state = level === undefined ? "unrated" : String(level);
               return (
-                <Accordion.Item
-                  value={item.id}
+                <li
                   key={item.id}
                   className="roadmap-item"
-                  data-learning-state={state}
-                  id={`roadmap-item-${item.id}`}
+                  data-learning-state={level ?? "unrated"}
                 >
-                  <div className="roadmap-item-header">
-                    <Accordion.Header>
-                      <Accordion.Trigger
-                        className="roadmap-item-trigger"
-                        aria-label={item.title}
-                        aria-describedby={`learning-state-${item.id}`}
-                      >
-                        <span
-                          className="mastery-dot"
-                          data-level={state}
-                          aria-hidden="true"
-                        />
-                        <span className="item-title-state">
-                          <span>{item.title}</span>
-                          <MasteryBadge
-                            level={level}
-                            id={`learning-state-${item.id}`}
-                          />
-                        </span>
-                        <ChevronDown size={17} />
-                      </Accordion.Trigger>
-                    </Accordion.Header>
-                    <ActionMenu
-                      label={`${item.title}のメニュー`}
-                      onEdit={() => {
-                        setEditing(item);
-                        setFormOpen(true);
-                      }}
-                      onDelete={() => {
-                        setError("");
-                        setDeleting(item);
-                      }}
+                  <Link
+                    className="item-detail-link"
+                    href={itemHref(themeId, item.id)}
+                    aria-label={item.title}
+                    aria-describedby={`learning-state-${item.id}`}
+                  >
+                    <span
+                      className="mastery-dot"
+                      data-level={level ?? "unrated"}
+                      aria-hidden="true"
                     />
-                  </div>
-                  <Accordion.Content className="roadmap-item-content">
-                    <div className="roadmap-item-body">
-                      <dl className="item-goal">
-                        <dt>到達目標</dt>
-                        <dd>{item.goal || "未設定"}</dd>
-                      </dl>
-                      {item.completed && (
-                        <span className="legacy-rating">旧版：習得済み</span>
-                      )}
-                      <MasteryControl
-                        themeId={themeId}
-                        target={{ type: "item", id: item.id }}
-                        name={item.title}
-                        compact={preview}
+                    <span className="item-title-state">
+                      <span>{item.title}</span>
+                      <MasteryBadge
+                        level={level}
+                        id={`learning-state-${item.id}`}
                       />
-                      <DailyActions
-                        themeId={themeId}
-                        itemId={item.id}
-                        fromTheme={preview}
-                      />
-                      <Link
-                        className="item-records-link"
-                        href={`/history?theme=${encodeURIComponent(themeId)}&item=${encodeURIComponent(item.id)}`}
-                      >
-                        この項目の記録
-                      </Link>
-                    </div>
-                  </Accordion.Content>
-                </Accordion.Item>
+                    </span>
+                    <ChevronRight size={17} aria-hidden="true" />
+                  </Link>
+                </li>
               );
             })}
-          </Accordion.Root>
+          </ol>
         )
       ) : (
         <p className="quiet-empty">項目を追加して、学びを小さく。</p>
@@ -215,54 +133,16 @@ export function RoadmapItems({
             : `すべて表示（${themeItems.length}項目）`}
         </button>
       )}
-      {error && !deleting && (
+      {error && (
         <p role="alert" className="form-error">
           {error}
         </p>
       )}
       <ItemForm
         themeId={themeId}
-        item={editing}
         open={formOpen}
         onClose={() => setFormOpen(false)}
       />
-      <Dialog
-        open={!!deleting}
-        onOpenChange={(value) => {
-          if (!value && !busy) setDeleting(undefined);
-        }}
-      >
-        <DialogContent>
-          <DialogTitle className="dialog-title">
-            学習項目を削除しますか？
-          </DialogTitle>
-          <DialogDescription className="dialog-description">
-            「{deleting?.title}
-            」と、この項目の学習記録を削除します。元に戻せません。
-          </DialogDescription>
-          {error && (
-            <p className="form-error" role="alert">
-              {error}
-            </p>
-          )}
-          <div className="form-actions">
-            <Button
-              variant="outline"
-              disabled={busy}
-              onClick={() => setDeleting(undefined)}
-            >
-              キャンセル
-            </Button>
-            <Button
-              variant="destructive"
-              disabled={busy}
-              onClick={() => void remove()}
-            >
-              削除する
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </section>
   );
 }

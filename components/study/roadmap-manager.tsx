@@ -5,7 +5,7 @@ import { ChevronRight, PenLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { masteryCounts, latestMastery } from "@/lib/ratings";
 import { nextStudyItem } from "@/lib/roadmap";
-import { roadmapHref } from "@/lib/learning-context";
+import { itemHref } from "@/lib/learning-context";
 import { useStudy } from "./provider";
 import { BackLink, Progress } from "./shared";
 import { RoadmapItems } from "./roadmap-items";
@@ -51,7 +51,11 @@ export function RoadmapManager({
         <p className="roadmap-totals">
           全 <strong>{counts.total}</strong> 項目{" "}
           <span>
-            説明できる以上 <strong>{counts[3] + counts[4]}</strong> 項目
+            説明できる・定着した：
+            <strong>
+              {counts[3] + counts[4]} / {counts.total}
+            </strong>{" "}
+            項目
           </span>
         </p>
         <Progress
@@ -63,7 +67,7 @@ export function RoadmapManager({
       {next ? (
         <Link
           className="next-study-item"
-          href={`${roadmapHref(themeId, next.id)}#roadmap-item-${encodeURIComponent(next.id)}`}
+          href={itemHref(themeId, next.id)}
           aria-label={`次に取り組む：${next.title}`}
         >
           <span>
@@ -77,7 +81,9 @@ export function RoadmapManager({
         </Link>
       ) : (
         themeItems.length > 0 && (
-          <p className="roadmap-hint">すべての項目が「説明できる」以上です。</p>
+          <p className="roadmap-hint">
+            すべての項目が「説明できる・定着した」です。
+          </p>
         )
       )}
       <RoadmapWorkflow

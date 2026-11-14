@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, ArrowRight, BookOpen, Timer, ChevronRight } from "lucide-react";
+import { ArrowRight, BookOpen, Timer, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -17,7 +17,6 @@ import { useStudy } from "./provider";
 import { studyRepository } from "@/lib/storage";
 import { BackLink, RecordList } from "./shared";
 import { ThemeForm } from "./theme-form";
-import { RecordForm } from "./record-form";
 import { ActionMenu } from "./action-menu";
 import { DailyActions } from "./daily-actions";
 import { LearningScreen } from "./learning-screen";
@@ -48,12 +47,18 @@ export function DetailScreen({
   id: string;
   initialItemId?: string;
 }) {
-  const { themes, subjects, items, records, masteryHistory, refresh } =
-    useStudy();
+  const {
+    themes,
+    subjects,
+    items,
+    records,
+    feedbacks,
+    masteryHistory,
+    refresh,
+  } = useStudy();
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [masteryOpen, setMasteryOpen] = useState(false);
-  const [recordOpen, setRecordOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -113,7 +118,7 @@ export function DetailScreen({
         aria-describedby="theme-progress-count"
       >
         <span id="theme-progress-count">
-          説明できる以上{" "}
+          説明できる・定着した：{" "}
           <strong>
             {counts[3] + counts[4]} / {counts.total}
           </strong>{" "}
@@ -155,22 +160,21 @@ export function DetailScreen({
       <section className="recent-section">
         <div className="section-heading">
           <h2>学習記録</h2>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setRecordOpen(true)}
-          >
-            <Plus />
-            学習を記録
-          </Button>
+          <Link className="text-link" href={`/history?theme=${id}`}>
+            すべて見る
+            <ArrowRight size={14} />
+          </Link>
         </div>
-        {recent.length ? (
+        {recent.length || feedbacks.some((entry) => entry.themeId === id) ? (
           <>
-            <RecordList records={recent} themes={themes} items={items} />
-            <Link className="text-link" href={`/history?theme=${id}`}>
-              すべて見る
-              <ArrowRight size={14} />
-            </Link>
+            <RecordList
+              records={recent}
+              feedbacks={feedbacks
+                .filter((entry) => entry.themeId === id)
+                .slice(0, 2)}
+              themes={themes}
+              items={items}
+            />
           </>
         ) : (
           <p className="quiet-empty">まだ記録はありません。</p>
@@ -184,7 +188,6 @@ export function DetailScreen({
         onClose={() => setMasteryOpen(false)}
       />
       <ThemeForm theme={theme} open={editOpen} onOpenChange={setEditOpen} />
-      <RecordForm themeId={id} open={recordOpen} onOpenChange={setRecordOpen} />
       <Dialog
         open={deleteOpen}
         onOpenChange={(value) => {
