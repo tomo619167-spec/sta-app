@@ -1,7 +1,14 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, BookOpen, House, Settings2, RotateCw } from "lucide-react";
+import {
+  ArrowLeft,
+  BookOpen,
+  House,
+  Settings2,
+  RotateCw,
+  Timer,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
@@ -13,7 +20,10 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const isThemeDetail = /^\/themes\/[^/]+\/?$/.test(path);
   const { loading, error, refresh } = useStudy();
-  const links = [{ href: "/", label: "ホーム", icon: House }];
+  const links = [
+    { href: "/", label: "ホーム", icon: House },
+    { href: "/timer", label: "タイマー", icon: Timer },
+  ];
   return (
     <div className="app-shell">
       <PencilDefinitions />

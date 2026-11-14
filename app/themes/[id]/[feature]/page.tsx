@@ -10,6 +10,8 @@ export default async function Page({
 }) {
   const { id, feature } = await params;
   const { item, from } = await searchParams;
+  if (feature === "pomodoro")
+    redirect(`/timer?type=theme&target=${encodeURIComponent(id)}`);
   if (feature === "roadmap")
     redirect(themeHref(id, typeof item === "string" ? item : undefined));
   return (

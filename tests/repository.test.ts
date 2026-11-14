@@ -770,7 +770,7 @@ test("v3 to v6 preserves every existing store byte-equivalently and never conver
   );
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 6);
+  assert.equal(db.version, 7);
   for (const [store, rows] of Object.entries(original))
     assert.deepEqual(await db.getAll(store), rows);
   db.close();
@@ -1385,8 +1385,8 @@ test("v4 to v6 adds draft and feedback stores and preserves all eight original s
   assert.equal(await repo.getRoadmapDraft(old.theme.id), undefined);
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 6);
-  assert.equal(db.objectStoreNames.length, 12);
+  assert.equal(db.version, 7);
+  assert.equal(db.objectStoreNames.length, 14);
   for (const [store, values] of Object.entries(rows))
     assert.deepEqual(await db.getAll(store), values);
   assert.deepEqual(await db.getAll("roadmap-drafts"), []);
@@ -1418,7 +1418,7 @@ test("failed v5 draft-store creation rolls back to v4 and retries safely", async
   assert.ok((await repo.listThemes()).length);
   await repo.close();
   const upgraded = await openDB(name);
-  assert.equal(upgraded.version, 6);
+  assert.equal(upgraded.version, 7);
   upgraded.close();
 });
 test("versioned drafts retain unfinished inputs and step separately per theme and disappear with their theme", async () => {
@@ -1889,8 +1889,8 @@ test("v5 to v6 preserves every existing row including in-progress roadmap drafts
   await repo.listRecords();
   await repo.close();
   const db = await openDB(name);
-  assert.equal(db.version, 6);
-  assert.equal(db.objectStoreNames.length, 12);
+  assert.equal(db.version, 7);
+  assert.equal(db.objectStoreNames.length, 14);
   for (const [store, values] of Object.entries(rows))
     assert.deepEqual(await db.getAll(store), values);
   for (const store of [

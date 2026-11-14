@@ -1,3 +1,4 @@
+import type { FocusCommand, FocusSession, FocusState } from "../focus";
 import type { LearningDraft } from "../learning";
 import type { FeedbackDraft, LearningFeedback } from "../learning-feedback";
 import type { RoadmapDraft } from "../roadmap-draft";
@@ -14,6 +15,10 @@ import type {
   ThemeInput,
 } from "../model";
 export interface StudyRepository {
+  getFocusState(): Promise<FocusState>;
+  updateFocus(command: FocusCommand, now?: number): Promise<FocusState>;
+  listFocusSessions(): Promise<FocusSession[]>;
+  deleteFocusSession(id: string): Promise<void>;
   getLearningDraft(key: string): Promise<LearningDraft | undefined>;
   saveLearningDraft(draft: LearningDraft): Promise<void>;
   saveLearningRecord(
