@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/phase-3-6-ui
+git checkout codex/prompt-mastery-polish
 npm install
 npm run dev
 ```
@@ -50,6 +50,8 @@ npm start
 - 記録：「すべて／説明／理解」で即時絞り込み。「すべて見る」の学習ノートでは複数の記録をその場で展開し、本文・完成度・問い・AI結果を閲覧、編集・削除できる
 - AIフィードバック：コピー → 結果の貼り付け → JSONプレビュー → 保存。作業途中も復元し、自己評価・習得度・自分の問いと分離
 - 理解を深めるプロンプト：「簡単／標準／面白おかしく」の説明スタイルを選択。初期値は簡単、JSON形式は共通、モードは下書きに保存
+- AI画面はモード・自分の問い・コピー／回答貼り付けを中心に表示。プロンプト全文は折りたたみで確認できる
+- 項目の習得度はタイトル横のピルから選ぶと保存。現在の段階・変更履歴を確認できる
 - スマホ入力：既存の全画面フォーム・VisualViewport対応を再利用
 - 保存後：学習項目一覧へ戻る／同じ項目で続ける。テーマ単位ではテーマ詳細へ戻る
 - 学習・プロンプト・JSON画面の「×」も元のテーマの一覧へ。下書き保存を待ち、スクロール位置・すべて表示を可能な範囲で復元
@@ -148,7 +150,7 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 実機の標準音声入力・IME・OSキーボード、外部AIサービスの実際の生成品質は自動テストに含みません。
 
-現在の画面と導線・保存仕様は[docs/phase-3-6.md](docs/phase-3-6.md)を参照してください。前段階の[Phase 3.5](docs/phase-3-5.md)、基礎となる学習機能・JSON仕様の[Phase 3](docs/phase-3.md)も保持しています。
+最新の[プロンプト・習得度の微調整](docs/prompt-mastery-polish.md)と、画面・導線・保存仕様の[Phase 3.6](docs/phase-3-6.md)を参照してください。前段階の[Phase 3.5](docs/phase-3-5.md)、基礎となる学習機能・JSON仕様の[Phase 3](docs/phase-3.md)も保持しています。
 
 今回の統合フロー・下書き保存は[docs/roadmap-ai-flow.md](docs/roadmap-ai-flow.md)、ロードマップとJSON仕様は[docs/phase-2.md](docs/phase-2.md)、テーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 
