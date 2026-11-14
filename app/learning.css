@@ -488,23 +488,12 @@
   border-top: 1px solid var(--border);
   margin-block: 6px;
 }
-.feedback-question > span {
-  font-size: var(--text-small);
-  color: var(--muted-foreground);
-}
-.feedback-question p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  margin-top: var(--space-2);
-}
-.feedback-prompt-disclosure summary {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  cursor: pointer;
-  font-size: var(--text-small);
-  color: var(--primary);
-}
-.feedback-prompt-disclosure textarea {
-  margin-top: var(--space-3);
+.feedback-prompt {
+  width: 100%;
+  height: 200px;
+  min-height: 200px;
+  max-height: 200px;
+  resize: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }

@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/prompt-mastery-polish
+git checkout codex/always-visible-ai-prompt
 npm install
 npm run dev
 ```
