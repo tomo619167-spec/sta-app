@@ -15,7 +15,7 @@ import { useStudy } from "./provider";
 import { BackLink } from "./shared";
 import { ActionMenu } from "./action-menu";
 import { ItemForm } from "./item-form";
-import { MasteryControl } from "./mastery-control";
+import { MasteryPill } from "./mastery-pill";
 import { RecentRecords } from "./recent-records";
 import { DailyActions } from "./daily-actions";
 export function ItemDetail({
@@ -76,22 +76,30 @@ export function ItemDetail({
     <div className="item-detail-page">
       <BackLink href={themeHref(themeId)}>学習項目一覧へ戻る</BackLink>
       <header className="item-detail-heading">
-        <div>
-          <p className="subject-label">
-            {subjects.find((entry) => entry.id === theme.subjectId)?.name ??
-              theme.subject}{" "}
-            · {theme.name}
-          </p>
-          <h1>{item.title}</h1>
+        <div className="item-heading-body">
+          <div className="item-heading-topline">
+            <p className="subject-label">
+              {subjects.find((entry) => entry.id === theme.subjectId)?.name ??
+                theme.subject}{" "}
+              · {theme.name}
+            </p>
+            <ActionMenu
+              label="学習項目のメニュー"
+              onEdit={() => setEditing(true)}
+              onDelete={() => {
+                setError("");
+                setDeleting(true);
+              }}
+            />
+          </div>
+          <div className="item-title-line">
+            <h1>{item.title}</h1>
+            <MasteryPill
+              themeId={themeId}
+              target={{ type: "item", id: itemId }}
+            />
+          </div>
         </div>
-        <ActionMenu
-          label="学習項目のメニュー"
-          onEdit={() => setEditing(true)}
-          onDelete={() => {
-            setError("");
-            setDeleting(true);
-          }}
-        />
       </header>
       {item.goal && (
         <section className="item-detail-goal">
@@ -99,11 +107,6 @@ export function ItemDetail({
           <p>{item.goal}</p>
         </section>
       )}
-      <MasteryControl
-        themeId={themeId}
-        target={{ type: "item", id: itemId }}
-        name={item.title}
-      />
       <DailyActions themeId={themeId} itemId={itemId} />
       {own.length > 0 && (
         <RecentRecords

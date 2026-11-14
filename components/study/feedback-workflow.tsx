@@ -75,7 +75,7 @@ export function FeedbackWorkflow({
   const [busy, setBusy] = useState(false);
   const [completed, setCompleted] = useState(false);
   const lock = useRef(false);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [promptOpen, setPromptOpen] = useState(false);
   const started = useRef(false);
   useEffect(() => {
     if (autoOpen && data && !started.current) {
@@ -101,8 +101,9 @@ export function FeedbackWorkflow({
       await navigator.clipboard.writeText(data.prompt);
       update({ copied: true });
     } catch {
+      setPromptOpen(true);
       setError(
-        "コピーできませんでした。プロンプトを選択して、端末のコピー操作を使ってください。",
+        "コピーできませんでした。プロンプト全文を開き、端末のコピー操作を使ってください。",
       );
     } finally {
       setBusy(false);
@@ -113,8 +114,7 @@ export function FeedbackWorkflow({
     if (!data || lock.current || stale) return;
     setError("");
     if (data.step === "prompt") {
-      if (data.copied) update({ step: "json" });
-      else await copy();
+      await copy();
       return;
     }
     if (data.step === "json") {
@@ -212,7 +212,7 @@ export function FeedbackWorkflow({
         title={
           record.activity === "output"
             ? "外部AIでフィードバック"
-            : "外部AIと考えを深める"
+            : "AIで理解を深める"
         }
         onSubmit={submit}
         busy={busy || state.loading}
@@ -232,9 +232,7 @@ export function FeedbackWorkflow({
             ? "フィードバックを保存"
             : data?.step === "json"
               ? "プレビュー"
-              : data?.copied
-                ? "結果を貼り付ける"
-                : "プロンプトをコピー"
+              : "プロンプトをコピー"
         }
         footer={
           stale ? (
@@ -261,7 +259,7 @@ export function FeedbackWorkflow({
             >
               プロンプトを作り直す
             </Button>
-          ) : data?.step === "prompt" && !data.copied ? (
+          ) : data?.step === "prompt" ? (
             <div className="workflow-footer">
               <Button type="submit" disabled={busy}>
                 プロンプトをコピー
@@ -272,37 +270,48 @@ export function FeedbackWorkflow({
                 onClick={() => update({ step: "json" })}
                 disabled={busy}
               >
-                結果を貼り付ける
+                AIの回答を貼り付ける
               </Button>
             </div>
           ) : undefined
         }
       >
         <fieldset className="workflow-fields" disabled={busy || state.loading}>
-          <ol className="workflow-steps" aria-label="フィードバックの進行状況">
-            {["プロンプト", "外部AIで生成", "結果を保存"].map(
-              (label, index) => (
-                <li
-                  key={label}
-                  aria-current={
-                    (data?.step === "prompt" ? (data.copied ? 2 : 1) : 3) ===
-                    index + 1
-                      ? "step"
-                      : undefined
-                  }
-                >
-                  <span>{index + 1}</span>
-                  {label}
-                </li>
-              ),
-            )}
-          </ol>
-          <div className="target-summary">
-            <span>
-              {record.targetType === "theme" ? "テーマ全体" : "学習項目"}
-            </span>
-            <strong>{item?.title ?? theme.name}</strong>
-          </div>
+          {data?.step !== "prompt" && (
+            <>
+              <ol
+                className="workflow-steps"
+                aria-label="フィードバックの進行状況"
+              >
+                {["プロンプト", "外部AIで生成", "結果を保存"].map(
+                  (label, index) => (
+                    <li
+                      key={label}
+                      aria-current={
+                        (data?.step === "prompt"
+                          ? data.copied
+                            ? 2
+                            : 1
+                          : 3) ===
+                        index + 1
+                          ? "step"
+                          : undefined
+                      }
+                    >
+                      <span>{index + 1}</span>
+                      {label}
+                    </li>
+                  ),
+                )}
+              </ol>
+              <div className="target-summary">
+                <span>
+                  {record.targetType === "theme" ? "テーマ全体" : "学習項目"}
+                </span>
+                <strong>{item?.title ?? theme.name}</strong>
+              </div>
+            </>
+          )}
           {stale ? (
             <p role="alert">
               記録が変更されています。最新の本文でプロンプトを作り直してください。
@@ -311,49 +320,38 @@ export function FeedbackWorkflow({
             <>
               {record.activity === "deepen" && (
                 <SegmentedControl
-                  label="説明スタイル"
+                  label="説明モード"
                   value={data.style ?? "simple"}
                   options={promptStyles}
                   onChange={changeStyle}
                   disabled={busy}
                 />
               )}
-              <p className="roadmap-hint">
-                外部AIへ貼り付け、返ってきたJSONを取り込みます。
-              </p>
+              {record.activity === "deepen" && (
+                <section className="feedback-question" aria-label="自分の問い">
+                  <span>自分の問い</span>
+                  <p>{record.question ?? record.note}</p>
+                </section>
+              )}
               {data.copied && (
                 <p role="status" aria-label="コピー状況">
                   コピーしました
                 </p>
               )}
-              <label htmlFor="feedback-prompt">生成したプロンプト</label>
-              <textarea
-                id="feedback-prompt"
-                ref={promptRef}
-                value={data.prompt}
-                readOnly
-                rows={12}
-                className="json-source"
-              />
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => {
-                  promptRef.current?.focus();
-                  promptRef.current?.select();
-                }}
+              <details
+                className="feedback-prompt-disclosure"
+                open={promptOpen}
+                onToggle={(event) => setPromptOpen(event.currentTarget.open)}
               >
-                プロンプトを選択
-              </Button>
-              {data.copied && (
-                <Button
-                  variant="ghost"
-                  type="button"
-                  onClick={() => void copy()}
-                >
-                  もう一度コピー
-                </Button>
-              )}
+                <summary>プロンプト全文を確認</summary>
+                <textarea
+                  aria-label="プロンプト全文"
+                  value={data.prompt}
+                  readOnly
+                  rows={12}
+                  className="json-source"
+                />
+              </details>
             </>
           ) : preview ? (
             <FeedbackBody document={preview} />
