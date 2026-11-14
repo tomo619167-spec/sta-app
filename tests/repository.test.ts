@@ -11,7 +11,11 @@ import {
   parseFeedbackJSON,
   assertFeedbackContext,
   initialFeedbackDraft,
+  promptStyles,
+  validateFeedbackDraft,
 } from "../lib/learning-feedback";
+import { questionKinds, questionTemplate } from "../lib/learning";
+import { filterRecords, recordKindLabel } from "../lib/record-filters";
 import { newRoadmapDraft, validateRoadmapDraft } from "../lib/roadmap-draft";
 import "fake-indexeddb/auto";
 import {
@@ -26,6 +30,92 @@ import { inferSubjectIcon, type SubjectIconKey } from "../lib/subject-icons";
 import { latestMastery, latestOutput, masteryCounts } from "../lib/ratings";
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
+
+test("3.6 all question kinds and explanation styles share the same accepted feedback schema", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  for (const kind of Object.keys(
+    questionKinds,
+  ) as (keyof typeof questionKinds)[]) {
+    const record = await repo.saveLearningRecord({
+      ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+      questionKind: kind,
+      question: questionTemplate(kind, "需要と供給"),
+    });
+    for (const style of promptStyles) {
+      const prompt = buildFeedbackPrompt(
+        record,
+        theme,
+        "経済学",
+        undefined,
+        style.value,
+      );
+      assert.ok(prompt.includes(`説明スタイル：${style.label}`));
+      assert.ok(prompt.includes(questionKinds[kind]));
+      if (kind === "definition") assert.ok(prompt.includes("簡潔な定義"));
+      if (style.value === "humorous")
+        assert.ok(prompt.includes("架空の例えと事実を明確に区別"));
+      const source = prompt.split("\n\n").at(-1)!;
+      assert.deepEqual(parseFeedbackJSON(source), feedbackExample(record));
+      await repo.importFeedback(record.id, source);
+    }
+  }
+  assert.equal((await repo.listFeedbacks()).length, 18);
+  assert.deepEqual(await repo.listMasteryHistory(), []);
+});
+
+test("3.6 styles persist in registered and pending question drafts while old drafts remain compatible", async () => {
+  const { repo, theme, itemTarget } = await learningSetup();
+  const record = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, itemTarget, "deepen"),
+    question: "なぜ？",
+  });
+  const draft = {
+    ...initialFeedbackDraft(
+      record,
+      buildFeedbackPrompt(record, theme, "経済学", undefined, "humorous"),
+    ),
+    style: "humorous" as const,
+    copied: true,
+    source: "{途中",
+  };
+  await repo.saveFeedbackDraft(draft);
+  await repo.close();
+  assert.deepEqual(await repo.getFeedbackDraft(record.id), draft);
+  const { style: _style, ...old } = draft;
+  assert.deepEqual(validateFeedbackDraft(old), old);
+  assert.throws(
+    () => validateFeedbackDraft({ ...draft, style: "other" as "simple" }),
+    /形式/,
+  );
+  assert.equal(initialFeedbackDraft(record, "").style, "simple");
+});
+
+test("3.6 record filters classify by stored activity, never by note text, and retain legacy memos", async () => {
+  const { repo, theme, themeTarget } = await learningSetup();
+  const output = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, themeTarget, "output"),
+    note: "理解を深めるという文字を含む説明",
+  });
+  const deepen = await repo.saveLearningRecord({
+    ...initialLearningDraft(theme.id, themeTarget, "deepen"),
+    question: "自分の言葉で説明とは？",
+  });
+  const memo = await repo.addRecord(theme.id, "アウトプット 理解を深める");
+  const records = await repo.listRecords();
+  assert.deepEqual(
+    filterRecords(records, "output").map((entry) => entry.id),
+    [output.id],
+  );
+  assert.deepEqual(
+    filterRecords(records, "deepen").map((entry) => entry.id),
+    [deepen.id],
+  );
+  assert.equal(filterRecords(records, "all").length, 3);
+  assert.equal(recordKindLabel(memo), "学習メモ（旧記録）");
+  assert.equal(recordKindLabel(output), "自分の言葉で説明");
+  assert.equal(recordKindLabel(deepen), "理解を深める");
+  assert.deepEqual(await repo.listRecords(), records);
+});
 import { itemHref, studyReturnHref } from "../lib/learning-context";
 import { openDB } from "idb";
 import { IndexedDBStudyRepository } from "../lib/storage/indexed-db";

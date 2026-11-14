@@ -24,9 +24,11 @@ import { studyReturnHref } from "@/lib/learning-context";
 export function RecordDetail({
   id,
   autoAI = false,
+  embedded = false,
 }: {
   id: string;
   autoAI?: boolean;
+  embedded?: boolean;
 }) {
   const { records, feedbacks, themes, subjects, items, refresh } = useStudy();
   const router = useRouter();
@@ -38,14 +40,16 @@ export function RecordDetail({
   const record = records.find((record) => record.id === id);
   const theme = themes.find((theme) => theme.id === record?.themeId);
   if (!record || !theme)
-    return (
-      <>
-        <BackLink href="/history">記録へ</BackLink>
-        <div className="empty-state">
-          <h1>記録が見つかりません</h1>
-        </div>
-      </>
-    );
+    if (embedded) return null;
+    else
+      return (
+        <>
+          <BackLink href="/history">記録へ</BackLink>
+          <div className="empty-state">
+            <h1>記録が見つかりません</h1>
+          </div>
+        </>
+      );
   const target = { type: record.targetType, id: record.targetId };
   const item =
     record.targetType === "item"
@@ -63,7 +67,7 @@ export function RecordDetail({
     try {
       await studyRepository.deleteRecord(id);
       await refresh();
-      router.replace(historyHref);
+      if (!embedded) router.replace(historyHref);
     } catch {
       setError("削除できませんでした。記録を残しています。");
     } finally {
@@ -72,48 +76,57 @@ export function RecordDetail({
   }
   return (
     <>
-      <BackLink href={studyReturnHref(theme.id, target)}>
-        {target.type === "item" ? "学習項目に戻る" : "テーマに戻る"}
-      </BackLink>
-      <header className="record-detail-heading">
-        <div>
-          <p className="subject-label">
-            {theme.name}
-            {item ? " / 学習項目" : ""}
-          </p>
-          <h1>
-            {record.activity === "output"
-              ? "自分の言葉で説明する"
-              : record.activity === "deepen"
-                ? "理解を深める"
-                : "学習メモ"}
-          </h1>
-        </div>
-        <ActionMenu
-          label="記録のメニュー"
-          onEdit={
-            record.activity === "memo" ? undefined : () => setEditing(true)
-          }
-          onDelete={() => setDeleting(true)}
-        />
-      </header>
-      {saved && <SavedActions themeId={theme.id} target={target} />}
-      <section className="learning-target" aria-label="現在の学習対象">
-        <span>{target.type === "theme" ? "テーマ全体" : "学習項目"}</span>
-        <h2>{name}</h2>
-        {record.activity === "output" && record.title && (
-          <p className="record-output-title">{record.title}</p>
-        )}
-      </section>
-      <div className="record-dates">
-        <time dateTime={record.createdAt ?? record.studiedAt}>
-          {dateLabel(record.createdAt ?? record.studiedAt, true)}
-        </time>
-        {record.updatedAt &&
-          record.updatedAt !== (record.createdAt ?? record.studiedAt) && (
-            <span>編集 · {dateLabel(record.updatedAt, true)}</span>
-          )}
-      </div>
+      {!embedded && (
+        <>
+          <BackLink href={studyReturnHref(theme.id, target)}>
+            {target.type === "item" ? "学習項目に戻る" : "テーマに戻る"}
+          </BackLink>
+          <header className="record-detail-heading">
+            <div>
+              <p className="subject-label">
+                {theme.name}
+                {item ? " / 学習項目" : ""}
+              </p>
+              <h1>
+                {record.activity === "output"
+                  ? "自分の言葉で説明する"
+                  : record.activity === "deepen"
+                    ? "理解を深める"
+                    : "学習メモ"}
+              </h1>
+            </div>
+            <ActionMenu
+              label="記録のメニュー"
+              onEdit={
+                record.activity === "memo" ? undefined : () => setEditing(true)
+              }
+              onDelete={() => setDeleting(true)}
+            />
+          </header>
+          <section className="learning-target" aria-label="現在の学習対象">
+            <span>{target.type === "theme" ? "テーマ全体" : "学習項目"}</span>
+            <h2>{name}</h2>
+            {record.activity === "output" && record.title && (
+              <p className="record-output-title">{record.title}</p>
+            )}
+          </section>
+          <div className="record-dates">
+            <time dateTime={record.createdAt ?? record.studiedAt}>
+              {dateLabel(record.createdAt ?? record.studiedAt, true)}
+            </time>
+            {record.updatedAt &&
+              record.updatedAt !== (record.createdAt ?? record.studiedAt) && (
+                <span>編集 · {dateLabel(record.updatedAt, true)}</span>
+              )}
+          </div>
+        </>
+      )}
+      {saved &&
+        (embedded ? (
+          <p role="status">保存しました</p>
+        ) : (
+          <SavedActions themeId={theme.id} target={target} />
+        ))}
       {record.activity === "deepen" && record.question ? (
         <dl className="deepening-content">
           <dt>{questionKinds[record.questionKind ?? "why"]}</dt>
@@ -176,9 +189,14 @@ export function RecordDetail({
               item={item}
               autoOpen={autoAI}
               onSaved={() => setSaved(true)}
+              stayOnPage={embedded}
+              resumeOnMount={!embedded}
             />
           )}
         </div>
+      )}
+      {embedded && (
+        <ActionMenu label="記録のメニュー" onDelete={() => setDeleting(true)} />
       )}
       {own.length > 0 && (
         <section className="recent-section">
@@ -212,6 +230,7 @@ export function RecordDetail({
           onClose={() => setEditing(false)}
           onSaved={() => {
             setSaved(true);
+            setEditing(false);
           }}
         />
       )}

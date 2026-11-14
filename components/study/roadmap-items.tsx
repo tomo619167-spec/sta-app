@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { useStudy } from "./provider";
 import { ReorderItems } from "./reorder-items";
 import { ItemForm } from "./item-form";
-import { itemHref } from "@/lib/learning-context";
+import { itemHref, roadmapHref } from "@/lib/learning-context";
 export function RoadmapItems({
   themeId,
   initialItemId,
@@ -22,11 +22,21 @@ export function RoadmapItems({
   const themeItems = items.filter((item) => item.themeId === themeId);
   const listId = useId();
   const previewLimit = 4;
-  const [showAll, setShowAll] = useState(
-    () =>
-      !!initialItemId &&
-      themeItems.findIndex((item) => item.id === initialItemId) >= previewLimit,
-  );
+  const [showAll, setShowAll] = useState(() => {
+    if (
+      initialItemId &&
+      themeItems.findIndex((item) => item.id === initialItemId) >= previewLimit
+    )
+      return true;
+    try {
+      return (
+        preview &&
+        sessionStorage.getItem(`trace-theme-all:${themeId}`) === "true"
+      );
+    } catch {
+      return false;
+    }
+  });
   const visibleItems =
     preview && !showAll ? themeItems.slice(0, previewLimit) : themeItems;
   const [reordering, setReordering] = useState(false);
@@ -58,16 +68,23 @@ export function RoadmapItems({
               {reordering ? "並び替え完了" : "並び替え"}
             </Button>
           )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setFormOpen(true);
-            }}
-          >
-            <Plus />
-            項目を追加
-          </Button>
+          {!preview && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setFormOpen(true);
+              }}
+            >
+              <Plus />
+              項目を追加
+            </Button>
+          )}
+          {preview && themeItems.length > 0 && (
+            <Link className="text-link" href={roadmapHref(themeId)}>
+              ロードマップを編集
+            </Link>
+          )}
         </div>
       </div>
       {themeItems.length ? (
@@ -118,7 +135,9 @@ export function RoadmapItems({
           </ol>
         )
       ) : (
-        <p className="quiet-empty">項目を追加して、学びを小さく。</p>
+        <Button asChild variant="outline">
+          <Link href={roadmapHref(themeId)}>ロードマップを追加</Link>
+        </Button>
       )}
       {preview && themeItems.length > previewLimit && (
         <button
@@ -126,7 +145,17 @@ export function RoadmapItems({
           type="button"
           aria-expanded={showAll}
           aria-controls={listId}
-          onClick={() => setShowAll((value) => !value)}
+          onClick={() =>
+            setShowAll((value) => {
+              try {
+                sessionStorage.setItem(
+                  `trace-theme-all:${themeId}`,
+                  String(!value),
+                );
+              } catch {}
+              return !value;
+            })
+          }
         >
           {showAll
             ? "表示を少なくする"

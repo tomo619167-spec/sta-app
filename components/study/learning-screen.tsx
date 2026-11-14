@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { PenLine, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,7 @@ export function LearningScreen({
   itemId?: string;
   fromTheme?: boolean;
 }) {
+  const router = useRouter();
   const { themes, items, records } = useStudy();
   const [open, setOpen] = useState(true);
   const [saved, setSaved] = useState<StudyRecord>();
@@ -87,9 +89,10 @@ export function LearningScreen({
           goal={resolved.item?.goal ?? theme.description}
           activity={feature}
           open
-          onClose={() => setOpen(false)}
+          onClose={() => router.replace(themeHref(themeId), { scroll: false })}
           onSaved={(entry) => {
             setSaved(entry);
+            setOpen(false);
           }}
         />
       )}

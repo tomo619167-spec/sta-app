@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { dateLabel, type StudyRecord } from "@/lib/model";
 import { outputLabel } from "@/lib/ratings";
 export function OutputComparison({
@@ -10,6 +10,7 @@ export function OutputComparison({
   records: StudyRecord[];
 }) {
   const [selectedId, setSelectedId] = useState("");
+  const selectId = useId();
   const scoped = records
     .filter(
       (record) =>
@@ -39,9 +40,9 @@ export function OutputComparison({
           </li>
         ))}
       </ol>
-      <label htmlFor="compare-output">比較する記録</label>
+      <label htmlFor={selectId}>比較する記録</label>
       <select
-        id="compare-output"
+        id={selectId}
         value={selected.id}
         onChange={(event) => setSelectedId(event.target.value)}
       >

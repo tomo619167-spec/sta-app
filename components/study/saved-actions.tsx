@@ -15,7 +15,7 @@ export function SavedActions({
     <section className="saved-actions" aria-label="保存後の操作">
       <p role="status">保存しました</p>
       <Button asChild>
-        <Link href={themeHref(themeId)}>
+        <Link href={themeHref(themeId)} scroll={false}>
           {target.type === "item" ? "学習項目一覧へ戻る" : "テーマ詳細へ戻る"}
         </Link>
       </Button>

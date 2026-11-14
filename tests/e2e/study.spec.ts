@@ -6,6 +6,335 @@ async function activate(locator: Locator) {
   else await locator.click();
 }
 
+test("3.6 empty roadmap creation and integrated progress disclosure preserve all management tools and legacy URLs", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await createTheme(page);
+  const themeUrl = page.url();
+  await expect(
+    page.getByRole("link", { name: "ロードマップを追加", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".theme-progress-disclosure")).not.toHaveAttribute(
+    "open",
+  );
+  await openRoadmap(page);
+  await expect(
+    page.getByRole("button", { name: "AIでロードマップを作成", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "JSONを直接取り込む", exact: true }),
+  ).toBeVisible();
+  await addItem(page, "原因");
+  await addItem(page, "影響");
+  await openItem(page);
+  await changeMastery(page, "説明できる");
+  await page.goto(themeUrl);
+  const progress = page.locator(".theme-progress-disclosure");
+  await activate(
+    page.getByText("説明できる・定着した：", { exact: false }).first(),
+  );
+  await expect(progress).toHaveAttribute("open", "");
+  await expect(
+    progress.getByRole("region", { name: "テーマ全体の到達目標" }),
+  ).toContainText("背景と影響");
+  await expect(progress.getByRole("img", { name: /習得状況/ })).toHaveAttribute(
+    "aria-label",
+    /説明できる 1項目/,
+  );
+  await expect(page.locator(".items-preview .roadmap-item")).toHaveCount(2);
+  await activate(
+    progress.getByRole("button", { name: "目標を編集", exact: true }),
+  );
+  await page
+    .getByRole("textbox", { name: "テーマ全体の到達目標", exact: true })
+    .fill("変化を比較して説明できる");
+  await activate(page.getByRole("button", { name: "保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(progress).toContainText("変化を比較して説明できる");
+  await activate(progress.locator("summary").first());
+  await expect(progress).not.toHaveAttribute("open");
+  await expect(page.locator(".items-preview .roadmap-item")).toHaveCount(2);
+  await page.goto(themeUrl + "/roadmap");
+  await expect(page).toHaveURL(themeUrl);
+  await expect(
+    page.getByRole("heading", { name: "フランス革命", level: 1 }),
+  ).toBeVisible();
+  await page.screenshot({
+    path: test.info().outputPath("integrated-progress-closed.png"),
+  });
+});
+
+test("3.6 closing item or theme learning returns to the theme explicitly, restores scroll and protects drafts", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page, [
+    "第一",
+    "第二",
+    "第三",
+    "第四",
+    "第五",
+  ]);
+  await page.goto(themeUrl);
+  await activate(
+    page.getByRole("button", { name: "すべて表示（5項目）", exact: true }),
+  );
+  await page
+    .getByRole("link", { name: "第五", exact: true })
+    .scrollIntoViewIfNeeded();
+  const y = await page.evaluate(() => scrollY);
+  await openItem(page, "第五");
+  await begin(page, "output");
+  await page
+    .getByLabel("アウトプット本文", { exact: true })
+    .fill("閉じても残す説明");
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(page).toHaveURL(themeUrl);
+  await expect(page.locator(".items-preview .roadmap-item")).toHaveCount(5);
+  await expect
+    .poll(async () => Math.abs((await page.evaluate(() => scrollY)) - y))
+    .toBeLessThan(96);
+  await openItem(page, "第五");
+  await begin(page, "output");
+  await expect(
+    page.getByLabel("アウトプット本文", { exact: true }),
+  ).toHaveValue("閉じても残す説明");
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(page).toHaveURL(themeUrl);
+  await begin(page, "deepen");
+  await page
+    .getByLabel("自分の問い", { exact: true })
+    .fill("テーマ全体への問い");
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(page).toHaveURL(themeUrl);
+  await begin(page, "deepen");
+  await expect(page.getByLabel("自分の問い", { exact: true })).toHaveValue(
+    "テーマ全体への問い",
+  );
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await activate(
+    page.getByRole("link", { name: "テーマ詳細へ戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(themeUrl);
+});
+
+test("3.6 all explanation modes share JSON import and persist mode and source across closing and reopening", async ({
+  page,
+}) => {
+  // Three complete AI round trips with reloads need a longer WebKit rendering budget.
+  test.slow();
+  await clipboard(page);
+  const { themeUrl } = await setupItems(page, ["需要と供給"]);
+  const editorUrl = page.url();
+  for (const [index, label] of ["簡単", "標準", "面白おかしく"].entries()) {
+    await page.goto(editorUrl);
+    await openItem(page, "需要と供給");
+    await begin(page, "deepen");
+    await activate(
+      page.getByRole("button", { name: "プロンプトを確認", exact: true }),
+    );
+    const styles = page.getByRole("group", { name: "説明スタイル" });
+    await expect(
+      styles.getByRole("button", { name: "簡単", exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await activate(styles.getByRole("button", { name: label, exact: true }));
+    const { prompt, document } = await feedbackJSON(page);
+    expect(prompt).toContain("説明スタイル：" + label);
+    expect(prompt).toContain("需要と供給とは？");
+    expect(document.version).toBe(3);
+    await activate(
+      page.getByRole("button", { name: "プロンプトをコピー", exact: true }),
+    );
+    await expect(page.getByRole("status", { name: "コピー状況" })).toHaveText(
+      "コピーしました",
+    );
+    await activate(
+      page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+    );
+    document.explanation = label + "モードの説明";
+    await page
+      .getByLabel("JSON", { exact: true })
+      .fill(JSON.stringify(document));
+    await waitForDraft(page);
+    await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+    await expect(page).toHaveURL(themeUrl);
+    await openItem(page, "需要と供給");
+    await begin(page, "deepen");
+    await expect(page.getByLabel("JSON", { exact: true })).toHaveValue(
+      JSON.stringify(document),
+    );
+    await activate(page.getByRole("button", { name: "戻る", exact: true }));
+    await expect(
+      styles.getByRole("button", { name: label, exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await page.reload();
+    await expect(
+      styles.getByRole("button", { name: label, exact: true }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await activate(
+      page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+    );
+    await activate(
+      page.getByRole("button", { name: "プレビュー", exact: true }),
+    );
+    await expect(page.locator(".feedback-body")).toContainText(
+      label + "モードの説明",
+    );
+    await activate(
+      page.getByRole("button", { name: "フィードバックを保存", exact: true }),
+    );
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    expect(await rows(page, "learning-feedback")).toHaveLength(index + 1);
+    await activate(
+      page.getByRole("link", { name: "学習項目一覧へ戻る", exact: true }),
+    );
+  }
+});
+
+test("3.6 recent record filters use activity, work instantly, and filter before the preview limit", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  for (let i = 0; i < 3; i++) {
+    await page.goto(themeUrl);
+    await begin(page, "output");
+    await finishOutput(page, "理解を深めるという文字を含む説明" + i);
+  }
+  await page.goto(themeUrl);
+  await begin(page, "deepen");
+  await page
+    .getByLabel("自分の問い", { exact: true })
+    .fill("自分の言葉で説明とは？");
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goto(themeUrl);
+  const all = await rows(page, "records");
+  const scope = page.getByRole("region", { name: "最近の学習記録" });
+  await expect(scope.locator(".record-list li")).toHaveCount(3);
+  await activate(scope.getByRole("button", { name: "理解", exact: true }));
+  await expect(scope.locator(".record-list li")).toHaveCount(1);
+  await expect(scope.locator(".record-kind")).toHaveText("理解を深める");
+  await activate(scope.getByRole("button", { name: "説明", exact: true }));
+  await expect(scope.locator(".record-list li")).toHaveCount(3);
+  await expect(scope.locator(".record-kind")).toHaveText([
+    "自分の言葉で説明",
+    "自分の言葉で説明",
+    "自分の言葉で説明",
+  ]);
+  await expect(page).toHaveURL(themeUrl);
+  expect(await rows(page, "records")).toEqual(all);
+  await activate(scope.getByRole("link", { name: "すべて見る", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "学習ノート", level: 1 }),
+  ).toBeVisible();
+  const url = page.url();
+  const filter = page.getByRole("group", { name: "ノートの絞り込み" });
+  await activate(filter.getByRole("button", { name: "理解", exact: true }));
+  await expect(page.locator(".notebook-record")).toHaveCount(1);
+  await activate(filter.getByRole("button", { name: "説明", exact: true }));
+  await expect(page.locator(".notebook-record")).toHaveCount(3);
+  await expect(page).toHaveURL(url);
+  expect(await rows(page, "records")).toEqual(all);
+});
+
+test("3.6 notebook reads multiple long records and AI inline, preserves target scope, and edits or deletes without leaving", async ({
+  page,
+}) => {
+  await clipboard(page);
+  const { themeUrl } = await setupItems(page);
+  const itemUrl = await openItem(page);
+  await begin(page, "output");
+  await page.getByLabel("タイトル", { exact: true }).fill("説明記録A");
+  const long = "長い説明を自分の言葉で振り返る。\n".repeat(300);
+  await finishOutput(page, long, "一部できた");
+  await page.goto(itemUrl);
+  await begin(page, "deepen");
+  await page
+    .getByLabel("自分の問い", { exact: true })
+    .fill("原因の背景をどう考える？");
+  await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.goto(themeUrl);
+  await openItem(page, "影響");
+  await begin(page, "output");
+  await finishOutput(page, "別項目の記録");
+  await page.goto(itemUrl);
+  await activate(page.getByRole("link", { name: "すべて見る", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "学習ノート", level: 1 }),
+  ).toBeVisible();
+  const notebookUrl = page.url();
+  await expect(page.locator(".notebook-record")).toHaveCount(2);
+  await expect(page.locator(".notebook-record-body")).toHaveCount(0);
+  const output = page
+    .locator(".notebook-record")
+    .filter({ has: page.locator(".notebook-title", { hasText: "説明記録A" }) });
+  const question = page.locator(".notebook-record").filter({
+    has: page.locator(".notebook-title", {
+      hasText: "原因の背景をどう考える？",
+    }),
+  });
+  await activate(output.locator("summary").first());
+  await activate(question.locator("summary").first());
+  await expect(page.locator(".notebook-record[open]")).toHaveCount(2);
+  await expect(output.locator(".record-full-text")).toHaveText(long.trim());
+  await expect(output.locator(".record-evaluation")).toContainText(
+    "一部できた",
+  );
+  await expect(question.locator(".deepening-content")).toContainText(
+    "原因の背景をどう考える？",
+  );
+  await activate(
+    question.getByRole("button", { name: "外部AIに相談", exact: true }),
+  );
+  const { document } = await feedbackJSON(page);
+  document.explanation = "ノート内で読むAIの参考情報";
+  await activate(
+    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+  );
+  await page.getByLabel("JSON", { exact: true }).fill(JSON.stringify(document));
+  await activate(page.getByRole("button", { name: "プレビュー", exact: true }));
+  await activate(
+    page.getByRole("button", { name: "フィードバックを保存", exact: true }),
+  );
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page).toHaveURL(notebookUrl);
+  await expect(question.locator(".feedback-entry")).toContainText(
+    document.explanation,
+  );
+  await page.setViewportSize({ width: 320, height: 640 });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: test.info().outputPath("learning-notebook.png"),
+  });
+  await activate(
+    output.getByRole("button", { name: "記録を編集", exact: true }),
+  );
+  await page
+    .getByLabel("アウトプット本文", { exact: true })
+    .fill("編集した説明");
+  await activate(page.getByRole("button", { name: "説明を保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(output.locator(".record-full-text")).toHaveText("編集した説明");
+  await expect(page).toHaveURL(notebookUrl);
+  await activate(
+    question.getByRole("button", { name: "記録のメニュー", exact: true }),
+  );
+  await activate(page.getByRole("menuitem", { name: "削除", exact: true }));
+  await activate(page.getByRole("button", { name: "削除する", exact: true }));
+  await expect(page.locator(".notebook-record")).toHaveCount(1);
+  await expect(page).toHaveURL(notebookUrl);
+  await activate(
+    page.getByRole("link", { name: "学習項目に戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(itemUrl);
+});
+
 async function setupItems(page: Page, names = ["原因", "影響"]) {
   await page.goto("/");
   await createTheme(page);
@@ -79,6 +408,55 @@ async function clipboard(page: Page, denied = false) {
     });
   }, denied);
 }
+
+test("3.6 registered AI close returns to the theme and empty filters or invalid note scopes never alter records", async ({
+  page,
+}) => {
+  const { themeUrl } = await setupItems(page);
+  const itemUrl = await openItem(page);
+  await begin(page, "output");
+  await finishOutput(page, "残す説明");
+  await activate(
+    page.getByRole("link", { name: "保存した記録・外部AI", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "外部AIでフィードバック", exact: true }),
+  );
+  await activate(
+    page.getByRole("button", { name: "結果を貼り付ける", exact: true }),
+  );
+  await page.getByLabel("JSON", { exact: true }).fill("{途中のAI結果");
+  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(page).toHaveURL(themeUrl);
+  const original = await rows(page, "records");
+  expect(await rows(page, "feedback-drafts")).toHaveLength(1);
+  await openItem(page);
+  const recent = page.getByRole("region", { name: "最近の学習記録" });
+  await activate(recent.getByRole("button", { name: "理解", exact: true }));
+  await expect(
+    recent.getByText("該当する記録はありません。", { exact: true }),
+  ).toBeVisible();
+  await activate(recent.getByRole("link", { name: "すべて見る", exact: true }));
+  await activate(
+    page
+      .getByRole("group", { name: "ノートの絞り込み" })
+      .getByRole("button", { name: "理解", exact: true }),
+  );
+  await expect(page.locator(".learning-notebook .quiet-empty")).toHaveText(
+    "該当する記録はありません。",
+  );
+  await activate(
+    page.getByRole("link", { name: "学習項目に戻る", exact: true }),
+  );
+  await expect(page).toHaveURL(itemUrl);
+  const themeId = new URL(themeUrl).pathname.split("/")[2];
+  await page.goto("/history?theme=" + themeId + "&item=missing");
+  await expect(
+    page.getByText("学習対象が見つかりません。", { exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".notebook-record")).toHaveCount(0);
+  expect(await rows(page, "records")).toEqual(original);
+});
 
 test("3.5 existing v6 records, legacy reflections, ratings and AI survive browsing and question-only edits", async ({
   page,
@@ -537,6 +915,7 @@ test("3.5 six question templates use one editable input and saving is independen
     page.getByRole("button", { name: "学習を保存", exact: true }),
   ).toHaveCount(0);
   await activate(page.getByRole("button", { name: "問いを保存", exact: true }));
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   expect(await rows(page, "records")).toHaveLength(1);
   expect(await rows(page, "learning-feedback")).toHaveLength(0);
   await activate(
@@ -600,10 +979,14 @@ test("3.5 unsaved question AI copies, resumes and imports JSON atomically with c
   await expect(page.locator(".record-list")).toContainText("AIフィードバック");
   await activate(page.getByRole("link", { name: "すべて見る", exact: true }));
   await expect(
-    page.getByLabel("学習項目で絞り込む", { exact: true }),
-  ).not.toHaveValue("");
-  await page.getByLabel("記録の種類", { exact: true }).selectOption("feedback");
-  await expect(page.locator(".record-list li")).toHaveCount(1);
+    page.getByRole("heading", { name: "学習ノート", level: 1 }),
+  ).toBeVisible();
+  await activate(
+    page
+      .getByRole("group", { name: "ノートの絞り込み" })
+      .getByRole("button", { name: "理解", exact: true }),
+  );
+  await expect(page.locator(".notebook-record")).toHaveCount(1);
 });
 
 test("3.5 cancel and failed AI registration keep drafts and let the question be saved on its own", async ({
@@ -637,7 +1020,9 @@ test("3.5 cancel and failed AI registration keep drafts and let the question be 
   await expect(page.getByRole("alert")).toContainText("取り込めません");
   expect(await rows(page, "records")).toHaveLength(0);
   expect(await rows(page, "learning-feedback")).toHaveLength(0);
-  await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await activate(page.getByRole("button", { name: "戻る", exact: true }));
+  await activate(page.getByRole("button", { name: "戻る", exact: true }));
+  await activate(page.getByRole("button", { name: "戻る", exact: true }));
   await expect(page.getByLabel("自分の問い", { exact: true })).toHaveValue(
     "原因とは？",
   );
@@ -858,7 +1243,7 @@ test("full-screen editor follows a shrunken and panned visual viewport and keeps
   await activate(save);
   await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.reload();
-  await activate(page.locator(".theme-goal-disclosure summary"));
+  await activate(page.locator(".theme-progress-disclosure > summary"));
   await expect(page.getByText("キーボード表示領域で保存")).toBeVisible();
   expect(
     await page.evaluate(
@@ -1090,7 +1475,7 @@ test("theme mastery badge is read-only while its menu edits the existing history
   await expect(
     page
       .getByRole("region", { name: "学習項目", exact: true })
-      .getByRole("button", { name: "項目を追加", exact: true }),
+      .getByRole("link", { name: "ロードマップを追加", exact: true }),
   ).toBeInViewport();
   await changeMastery(page, "定着した", "theme");
   await expect(page.locator(".detail-intro > .mastery-badge")).toHaveText(
@@ -1147,11 +1532,17 @@ function roadmapJSON(items: { title: string; goal: string }[]) {
   });
 }
 async function openRoadmap(page: Page) {
-  await activate(
-    page.getByRole("link", { name: "ロードマップを見る", exact: true }),
-  );
+  const action = page.getByRole("link", {
+    name: "ロードマップを追加",
+    exact: true,
+  });
+  if (await action.count()) await activate(action);
+  else
+    await activate(
+      page.getByRole("link", { name: "ロードマップを編集", exact: true }),
+    );
   await expect(
-    page.getByRole("heading", { name: "ロードマップ", level: 1 }),
+    page.getByRole("heading", { name: "ロードマップを編集", level: 1 }),
   ).toBeVisible();
 }
 
@@ -1375,10 +1766,14 @@ test("Phase 2 failed batch import leaves no partial rows and clipboard denial ke
     page.getByRole("list", { name: "取り込みプレビュー" }),
   ).toContainText("取込A");
   await activate(page.getByRole("button", { name: "閉じる", exact: true }));
+  await expect(
+    page.getByRole("heading", { name: "フランス革命", level: 1 }),
+  ).toBeVisible();
   await page.reload();
   await expect(page.locator(".item-title-state > span:first-child")).toHaveText(
     ["残す項目"],
   );
+  await openRoadmap(page);
   await activate(
     page.getByRole("button", { name: "AIでロードマップを作成", exact: true }),
   );

@@ -12,10 +12,11 @@ import {
 import { studyRepository } from "@/lib/storage";
 import { themeHref, roadmapHref } from "@/lib/learning-context";
 import { useStudy } from "./provider";
-import { BackLink, RecordList } from "./shared";
+import { BackLink } from "./shared";
 import { ActionMenu } from "./action-menu";
 import { ItemForm } from "./item-form";
 import { MasteryControl } from "./mastery-control";
+import { RecentRecords } from "./recent-records";
 import { DailyActions } from "./daily-actions";
 export function ItemDetail({
   themeId,
@@ -104,24 +105,15 @@ export function ItemDetail({
         name={item.title}
       />
       <DailyActions themeId={themeId} itemId={itemId} />
-      {(own.length > 0 || ai.length > 0) && (
-        <section className="recent-section">
-          <div className="section-heading">
-            <h2>この項目の記録</h2>
-            <Link
-              className="text-link"
-              href={`/history?theme=${encodeURIComponent(themeId)}&item=${encodeURIComponent(itemId)}`}
-            >
-              すべて見る
-            </Link>
-          </div>
-          <RecordList
-            records={own.slice(0, 3)}
-            feedbacks={ai.slice(0, 2)}
-            themes={themes}
-            items={items}
-          />
-        </section>
+      {own.length > 0 && (
+        <RecentRecords
+          records={own}
+          feedbacks={ai}
+          themes={themes}
+          items={items}
+          themeId={themeId}
+          itemId={itemId}
+        />
       )}
       <Link
         className="text-link item-management-link"

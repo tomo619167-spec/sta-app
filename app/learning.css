@@ -314,3 +314,73 @@
   width: 100%;
   justify-self: center;
 }
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  padding: 3px;
+  gap: 3px;
+  margin-block: var(--space-3);
+}
+.segmented-control button {
+  min-height: 44px;
+  padding: 7px 5px;
+  font-size: var(--text-small);
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-control);
+}
+.segmented-control button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.segmented-control button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.segmented-control button:disabled {
+  opacity: 0.5;
+}
+.record-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--foreground);
+  font-size: var(--text-caption);
+}
+.record-kind::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border: 1px solid var(--primary);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.record-kind[data-kind="output"]::before {
+  background: var(--primary);
+}
+.theme-progress-disclosure > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.theme-progress-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+.theme-progress-disclosure[open] > summary svg {
+  transform: rotate(90deg);
+}
+.theme-progress-details {
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.theme-progress-details .roadmap-goal {
+  margin-top: 0;
+}
+.item-detail-heading > div {
+  min-width: 0;
+}
+.item-detail-heading .subject-label {
+  overflow-wrap: anywhere;
+}
