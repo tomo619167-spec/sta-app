@@ -7,7 +7,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--space-3);
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-3);
 }
 .focus-heading h1 {
   font-family: var(--font-editorial);
@@ -15,7 +15,7 @@
 }
 .focus-clock {
   text-align: center;
-  padding-block: var(--space-8);
+  padding-block: 0 var(--space-3);
 }
 .focus-clock > p {
   color: var(--muted-foreground);
@@ -23,8 +23,8 @@
 }
 .focus-digits {
   font-family: var(--font-numerals);
-  font-size: clamp(4.2rem, 19vw, 6rem);
-  line-height: 1.35;
+  font-size: clamp(3.5rem, 17vw, 5rem);
+  line-height: 1.15;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.035em;
 }
@@ -129,4 +129,58 @@
 }
 .focus-note-facts dd {
   overflow-wrap: anywhere;
+}
+
+/* Decorative ink stays isolated from timer measurement and controls. */
+.focus-notebook {
+  width: 100%;
+  max-width: 440px;
+  margin: var(--space-3) auto var(--space-2);
+  pointer-events: none;
+}
+.focus-notebook svg {
+  display: block;
+  width: 100%;
+  height: clamp(126px, 37vw, 176px);
+  overflow: hidden;
+}
+.notebook-paper {
+  fill: var(--field-background);
+  stroke: var(--border);
+  stroke-width: 0.7;
+}
+.notebook-rules {
+  stroke: var(--pencil-rule);
+  stroke-width: 0.65;
+  opacity: 0.23;
+}
+.notebook-ink {
+  stroke: var(--primary);
+  stroke-width: 1.1;
+  opacity: 0.85;
+}
+.notebook-check {
+  fill: none;
+  stroke: var(--primary);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.notebook-page-number {
+  font-family: var(--font-numerals);
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  fill: var(--muted-foreground);
+}
+.focus-clock > p {
+  margin-top: var(--space-1);
+}
+.focus-notebook + .focus-completion {
+  margin-top: var(--space-3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .focus-notebook * {
+    animation: none !important;
+    transition: none !important;
+  }
 }
