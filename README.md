@@ -10,7 +10,7 @@ Node.js 24を推奨。APIキー・環境変数は不要です。
 git clone https://github.com/tomo619167-spec/sta-app.git
 cd sta-app
 # この改善PRがマージされる前のみ
-git checkout codex/phase-4-focus-timer
+git checkout codex/phase-4-5-pencil-notebook
 npm install
 npm run dev
 ```
@@ -60,6 +60,12 @@ npm start
 過去問は準備中です。集中タイマー（シンプル／ポモドーロ）は利用できます。アプリ内AI・独自の音声認識APIは搭載しません。テキスト欄は端末の標準キーボードの音声入力を利用できる構成ですが、実機での音声入力は未検証です。
 
 通常のテーマ詳細の学習導線は維持し、作成ツールはロードマップ管理画面に集約しています。「次に取り組む」は表示順の未着手・学習中を優先し、該当がなければ未評価の項目を表示します。どの項目も一覧から自由に選べます。
+
+## 集中ノートの演出
+
+集中タイマーでは、経過時間に合わせて鉛筆がノートに線・図形を描き足します。4種類のパターンをセッションとセットから固定して選び、一時停止・途中終了・再読み込み後も描画位置を復元します。休憩中は完成ページを保持し、次の集中セットで新しいページになります。動きを減らす設定では鉛筆を静止させます。
+
+表示専用のSVG演出です。計測・記録・IndexedDB v7は変更していません。方式・制約・テストは[Phase 4.5](docs/phase-4-5.md)を参照してください。
 
 ## 保存構造・移行
 
@@ -160,7 +166,7 @@ E2EはChromiumのPixel 7プロファイル、WebKitのiPhone 13プロファイ�
 
 実機の標準音声入力・IME・OSキーボード、外部AIサービスの実際の生成品質は自動テストに含みません。
 
-最新の[Phase 4 集中タイマー](docs/phase-4.md)、[プロンプト・習得度の微調整](docs/prompt-mastery-polish.md)と、画面・導線・保存仕様の[Phase 3.6](docs/phase-3-6.md)を参照してください。前段階の[Phase 3.5](docs/phase-3-5.md)、基礎となる学習機能・JSON仕様の[Phase 3](docs/phase-3.md)も保持しています。
+最新の[Phase 4.5 鉛筆と集中ノート](docs/phase-4-5.md)、[Phase 4 集中タイマー](docs/phase-4.md)、[プロンプト・習得度の微調整](docs/prompt-mastery-polish.md)と、画面・導線・保存仕様の[Phase 3.6](docs/phase-3-6.md)を参照してください。前段階の[Phase 3.5](docs/phase-3-5.md)、基礎となる学習機能・JSON仕様の[Phase 3](docs/phase-3.md)も保持しています。
 
 今回の統合フロー・下書き保存は[docs/roadmap-ai-flow.md](docs/roadmap-ai-flow.md)、ロードマップとJSON仕様は[docs/phase-2.md](docs/phase-2.md)、テーマ詳細の改善は[docs/theme-learning-entry.md](docs/theme-learning-entry.md)、評価・移行仕様は[docs/four-level-ratings.md](docs/four-level-ratings.md)、デザイン刷新の記録は[docs/trace-design-v1.md](docs/trace-design-v1.md)、学習導線の仕様は[docs/learning-navigation.md](docs/learning-navigation.md)を参照してください。過去の記録は[Phase 1.5](docs/phase-1-5.md)、[Phase 1](docs/phase-1.md)に残しています。
 

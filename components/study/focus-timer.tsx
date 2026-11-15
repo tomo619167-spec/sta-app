@@ -24,6 +24,7 @@ import { useFocusTimer } from "./focus-provider";
 import { SegmentedControl } from "./segmented-control";
 import { EditorDialog } from "./editor-dialog";
 import { DailyActions } from "./daily-actions";
+import { FocusNotebookAnimation } from "./focus-notebook/focus-notebook-animation";
 
 function FocusSettingsForm({
   settings,
@@ -210,6 +211,7 @@ export function FocusTimerScreen({
         </div>
       )}
       {!state && !error && <p role="status">タイマーを開いています…</p>}
+      <FocusNotebookAnimation timer={timer} now={now} />
       {done ? (
         <section className="focus-completion" aria-label="集中の完了">
           <h2>集中おつかれさまでした</h2>
@@ -255,16 +257,6 @@ export function FocusTimerScreen({
       ) : (
         <>
           <section className="focus-clock" aria-label="タイマー">
-            <p>
-              {phaseLabel}
-              {timer?.status === "paused"
-                ? " · 一時停止中"
-                : timer?.status === "review"
-                  ? " · 途中終了"
-                  : timer?.status === "completed"
-                    ? " · 完了"
-                    : ""}
-            </p>
             <div
               className="focus-digits"
               role="timer"
@@ -279,6 +271,16 @@ export function FocusTimerScreen({
                       : settings.focusMinutes) * 60,
               )}
             </div>
+            <p>
+              {phaseLabel}
+              {timer?.status === "paused"
+                ? " · 一時停止中"
+                : timer?.status === "review"
+                  ? " · 途中終了"
+                  : timer?.status === "completed"
+                    ? " · 完了"
+                    : ""}
+            </p>
             {mode === "pomodoro" ? (
               <p className="focus-set">
                 {timer
